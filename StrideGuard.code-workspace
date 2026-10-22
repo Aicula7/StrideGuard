@@ -1,0 +1,23 @@
+{
+  "folders": [{ "name": "StrideGuard App", "path": "app" }],
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      { "label": "App: dev", "type": "npm", "script": "dev", "problemMatcher": [] },
+      { "label": "App: build", "type": "npm", "script": "build", "group": "build", "problemMatcher": "$tsc" },
+      { "label": "App: test", "type": "npm", "script": "test", "group": "test", "problemMatcher": [] }
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "App: Chrome (start dev server first)",
+        "type": "chrome",
+        "request": "launch",
+        "url": "http://localhost:4173",
+        "webRoot": "${workspaceFolder}/src"
+      }
+    ]
+  }
+}
