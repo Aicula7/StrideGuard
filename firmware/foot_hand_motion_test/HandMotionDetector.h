@@ -1,0 +1,96 @@
+#pragma once
+#include <math.h>
+#include <stdint.h>
+
+// Bench-test gesture detector, NOT a running foot-strike detector.
+// Each gesture must be separated by a quiet hold before another can trigger.
+class HandMotionDetector {
+ public:
+  static constexpr float Gravity = 9.80665f;
+  static constexpr float AccelHigh = 2.5f;  // |magnitude - gravity|, m/s^2
+  static constexpr float GyroHigh = 1.0f;   // angular-rate magnitude, rad/s
+  static constexpr float AccelQuiet = 0.8f;
+  static constexpr float GyroQuiet = 0.30f;
+  static constexpr uint32_t QuietHoldMs = 120;
+  static constexpr uint32_t ActiveHoldMs = 20;
+  static constexpr uint32_t RefractoryMs = 350;
+  static constexpr uint32_t MaxSampleGapMs = 100;
+  struct Result {
+    bool valid = false;
+    bool event = false;
+    bool armed = false;
+    float accelerationDeviation = 0;
+    float angularRateMagnitude = 0;
+  };
+
+  void reset() {
+    armed_ = false;
+    quietTracking_ = false;
+    activeTracking_ = false;
+    hasSample_ = false;
+    hasEvent_ = false;
+  }
+
+  Result update(uint32_t timeMs, float ax, float ay, float az,
+                float gx, float gy, float gz) {
+    Result out;
+    if (!isfinite(ax) || !isfinite(ay) || !isfinite(az) ||
+        !isfinite(gx) || !isfinite(gy) || !isfinite(gz)) {
+      reset();
+      return out;
+    }
+    if (hasSample_ && timeMs - lastSampleMs_ > MaxSampleGapMs) {
+      armed_ = false;
+      quietTracking_ = false;
+      activeTracking_ = false;
+    }
+    hasSample_ = true;
+    lastSampleMs_ = timeMs;
+    out.valid = true;
+    out.accelerationDeviation = sqrtf(ax * ax + ay * ay + az * az) - Gravity;
+    out.angularRateMagnitude = sqrtf(gx * gx + gy * gy + gz * gz);
+    const float deviation = fabsf(out.accelerationDeviation);
+    const bool quiet = deviation < AccelQuiet && out.angularRateMagnitude < GyroQuiet;
+    const bool active = deviation > AccelHigh || out.angularRateMagnitude > GyroHigh;
+
+    if (quiet) {
+      activeTracking_ = false;
+      if (!quietTracking_) {
+        quietTracking_ = true;
+        quietSinceMs_ = timeMs;
+      }
+      if (timeMs - quietSinceMs_ >= QuietHoldMs) armed_ = true;
+    } else {
+      quietTracking_ = false;
+      if (armed_ && active) {
+        if (!activeTracking_) {
+          activeTracking_ = true;
+          activeSinceMs_ = timeMs;
+        }
+        if (timeMs - activeSinceMs_ >= ActiveHoldMs &&
+            (!hasEvent_ || timeMs - lastEventMs_ >= RefractoryMs)) {
+          out.event = true;
+          hasEvent_ = true;
+          lastEventMs_ = timeMs;
+          armed_ = false;
+          activeTracking_ = false;
+        }
+      } else {
+        activeTracking_ = false;
+      }
+    }
+    out.armed = armed_;
+    return out;
+  }
+
+ private:
+  bool armed_ = false;
+  bool quietTracking_ = false;
+  bool activeTracking_ = false;
+  bool hasSample_ = false;
+  bool hasEvent_ = false;
+  uint32_t quietSinceMs_ = 0;
+  uint32_t activeSinceMs_ = 0;
+  uint32_t lastSampleMs_ = 0;
+  uint32_t lastEventMs_ = 0;
+};
