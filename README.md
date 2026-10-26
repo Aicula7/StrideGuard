@@ -1,16 +1,41 @@
 # StrideGuard
 
-StrideGuard firmware and React app.
+ECE 590 running-gait monitoring prototype: a shoe-mounted IMU and XIAO ESP32-C3 send data over BLE to an Adafruit ESP32-S3 Feather wrist unit with a DRV2605L haptic driver. The intended system monitors sustained deviation from a runner's initial baseline and presents the same processed information on a mobile-friendly dashboard.
 
-- Arduino firmware: the independent `.ino` sketches in this directory.
-- React + TypeScript app: [`app/`](app/README.md).
-- Desktop VS Code setup: [development guide](app/VS_CODE.md).
+## Current projects
 
-Open `StrideGuard.code-workspace` in VS Code, then run the following in its app terminal (Node.js 24 LTS recommended):
+| Directory | Purpose | Current status |
+| --- | --- | --- |
+| `firmware/foot_full_ble_test/` | Foot IMU acquisition and BLE notification server | Original full hardware-test source preserved |
+| `firmware/wrist_full_system_test/` | BLE receiver, wrist IMU, and manual vibration test | Original full hardware-test source preserved; no automatic gait detector integrated |
+| `algorithm_demo/gait_stability_sim/` | Independent baseline-relative stride-timing simulation | Software detector tested on generated events; no real IMU input |
+| `app/` | Web dashboard (React + TypeScript) | Demo sessions and USB processed-metric input; not yet connected to the firmware's raw output |
+
+## Start with the algorithm simulation
+
+Open `algorithm_demo/gait_stability_sim/gait_stability_sim.ino` in Arduino IDE. Keep `GaitStabilityDetector.h` in the same folder. Upload to the actual wrist board using the team's validated board/USB settings. No foot node, IMU, or motor is needed with the default settings.
+
+Open Serial Monitor at **115200 baud**, wait about **22.5 seconds** for `BASELINE_READY`, then send `u` for sustained irregular timing, `n` for recovery, or `s` for a single disturbance. See the [algorithm guide](algorithm_demo/README.md) for parameters, commands, validation, and optional motor output.
+
+This is a separate sketch. Uploading it replaces the wrist's running BLE firmware. To restore the hardware test, upload `firmware/wrist_full_system_test/wrist_full_system_test.ino` again. Do not combine the three sketches into one Arduino project.
+
+## Original hardware tests
+
+Open each `.ino` from its own matching folder under `firmware/`. Select the actual board and port separately. The foot source assumes XIAO ESP32-C3 with D4/D5 for I2C. The wrist uses the selected board's default I2C pins. Both require an IMU at `0x6A`; the wrist also requires its DRV2605L before starting BLE.
+
+Start the foot first, then reset the wrist. The wrist scans once for five seconds. Use **115200 baud** and send `v` to the wrist for the existing manual vibration test. The current full firmware streams raw six-axis readings, with no gait-event extraction or automatic alert logic. Reliable reconnection, real feature extraction, and dashboard integration remain to be implemented.
+
+## Web app and VS Code
+
+Open `StrideGuard.code-workspace` for the whole repository. Its default terminal opens in `app/`. With Node.js 24 LTS installed:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-The app includes a simulated session workflow and Web Serial input for processed gait metrics. Existing firmware output still needs an adapter; BLE and wristband controls are not integrated into the app yet.
+The workspace also provides app build/test tasks and browser debugging. See the [desktop development guide](app/VS_CODE.md) and [app data format](app/README.md).
+
+## Repository cleanup
+
+The nine early component-only sketches were removed from the current tree. Their source remains in Git history. The two full hardware-test sketches were moved into Arduino-compatible directories without changing their contents. Keep repository filenames, code, comments, documentation, and workspace configuration in English.

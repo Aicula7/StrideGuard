@@ -1,11 +1,36 @@
 {
-  "folders": [{ "name": "StrideGuard App", "path": "app" }],
+  "folders": [
+    {
+      "name": "StrideGuard",
+      "path": "."
+    }
+  ],
   "tasks": {
     "version": "2.0.0",
     "tasks": [
-      { "label": "App: dev", "type": "npm", "script": "dev", "problemMatcher": [] },
-      { "label": "App: build", "type": "npm", "script": "build", "group": "build", "problemMatcher": "$tsc" },
-      { "label": "App: test", "type": "npm", "script": "test", "group": "test", "problemMatcher": [] }
+      {
+        "label": "App: dev",
+        "type": "npm",
+        "script": "dev",
+        "problemMatcher": [],
+        "path": "app"
+      },
+      {
+        "label": "App: build",
+        "type": "npm",
+        "script": "build",
+        "group": "build",
+        "problemMatcher": "$tsc",
+        "path": "app"
+      },
+      {
+        "label": "App: test",
+        "type": "npm",
+        "script": "test",
+        "group": "test",
+        "problemMatcher": [],
+        "path": "app"
+      }
     ]
   },
   "launch": {
@@ -16,8 +41,11 @@
         "type": "chrome",
         "request": "launch",
         "url": "http://localhost:4173",
-        "webRoot": "${workspaceFolder}/src"
+        "webRoot": "${workspaceFolder}/app/src"
       }
     ]
+  },
+  "settings": {
+    "terminal.integrated.cwd": "${workspaceFolder}/app"
   }
 }

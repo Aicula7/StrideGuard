@@ -8,14 +8,14 @@ This is a React + TypeScript web app for desktop and mobile browsers. It support
 2. Open a terminal in the directory where you want to store the project:
 
    ```sh
-   git clone --branch codex/react-app https://github.com/Aicula7/StrideGuard.git
+   git clone --branch main https://github.com/Aicula7/StrideGuard.git
    cd StrideGuard
    code StrideGuard.code-workspace
    ```
 
    If the `code` command is unavailable, use **File > Open Workspace from File** in VS Code and select `StrideGuard.code-workspace`.
 
-3. The workspace opens the `app` folder. Choose **Terminal > New Terminal**, then run:
+3. The workspace opens the whole repository, with its terminal starting in `app/`. Choose **Terminal > New Terminal**, then run:
 
    ```sh
    npm ci
@@ -26,7 +26,7 @@ This is a React + TypeScript web app for desktop and mobile browsers. It support
 
 If Windows PowerShell blocks `npm.ps1`, use `npm.cmd ci` and `npm.cmd run dev`, or switch your terminal to Command Prompt.
 
-If you already have a clone, review and save your local changes first. Run `git fetch origin` and `git switch codex/react-app` in that clone, then open the workspace instead of cloning again.
+If you already have a clone, review and save your local changes first. Run `git fetch origin` and `git switch main` in that clone, then open the workspace instead of cloning again.
 
 ## Checks and debugging
 
@@ -43,7 +43,8 @@ You can also select **Terminal > Run Task** and choose `App: dev`, `App: test`, 
 - `src/index.css`: styling and responsive layouts.
 - `src/core.js`: packet parsing, timing, and summaries.
 - `tests/core.test.mjs`: existing automated tests.
-- Repository root `.ino` files: existing Arduino firmware.
+- `firmware/`: the two original full Arduino hardware-test sketches.
+- `algorithm_demo/`: the separate gait timing simulation and detector tests.
 
 ## Hardware integration status
 
