@@ -51,7 +51,11 @@ void setup() {
   Serial.begin(115200);
   delay(1500);
   Serial.println("# MANUAL_HAND_TEST: real foot IMU input, not validated gait detection.");
-  Wire.begin(D4, D5);  // XIAO ESP32-C3: D4=SDA, D5=SCL.
+  // Use the selected board's SDA/SCL pins, not XIAO-only D4/D5 aliases.
+  // For custom wiring, replace this with Wire.begin(sdaGpio, sclGpio).
+  Wire.begin();
+  Serial.printf("# I2C board defaults: SDA=%u SCL=%u\n",
+      static_cast<unsigned>(SDA), static_cast<unsigned>(SCL));
   if (!imu.begin_I2C(0x6A, &Wire)) {
     Serial.println("# ERROR: Foot IMU not found at 0x6A.");
     while (true) delay(100);

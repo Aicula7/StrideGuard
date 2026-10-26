@@ -6,7 +6,7 @@ Use this version when the foot module can only be moved by hand. It validates th
 
 | Window | Open this sketch | Upload to |
 | --- | --- | --- |
-| Left / foot | `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` | Seeed XIAO ESP32-C3 |
+| Left / foot | `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` | Actual foot board: proposal uses XIAO ESP32-C3; Feather ESP32-S3 compilation is also supported |
 | Right / wrist | `firmware/wrist_hand_motion_test/wrist_hand_motion_test.ino` | Actual Adafruit ESP32-S3 Feather variant |
 
 Download and fully extract the repository ZIP first. In each Arduino IDE window, close the old Serial Monitor, then use **File > Open** for the corresponding new `.ino`. The IDE may open another window; upload only from the new hand-test windows. Keep every `.h` beside its matching `.ino`. Do not copy all headers or both sketches into one folder.
@@ -17,14 +17,16 @@ Original sketches remain under `foot_full_ble_test/` and `wrist_full_system_test
 
 ## Wiring and dependencies
 
-Keep the team's working wiring. The foot source uses XIAO D4=SDA and D5=SCL, an LSM6DS3TR-C at address `0x6A`, 4 g accelerometer range, and 500 degrees/second gyroscope range. The IMU output data rates are 104 Hz and the firmware polls approximately every 10 ms. Timing is best-effort, not a precision synchronized acquisition system.
+Keep the team's working wiring. The foot source uses `Wire.begin()` and prints the selected board's default SDA/SCL GPIO numbers. In core 2.0.17, XIAO ESP32-C3 defaults are SDA=GPIO6 (D4), SCL=GPIO7 (D5); Adafruit Feather ESP32-S3 No PSRAM defaults are SDA=GPIO3, SCL=GPIO4. Wire the actual board's SDA/SCL pins accordingly. If existing wiring uses different GPIOs, specify those actual GPIO numbers in `Wire.begin(sdaGpio, sclGpio)`; do not guess from a different board's labels. The selected board must match the physical MCU, even if a program compiles for both targets.
+
+The foot requires an LSM6DS3TR-C at address `0x6A`, uses 4 g accelerometer range and 500 degrees/second gyroscope range. The IMU output data rates are 104 Hz and the firmware polls approximately every 10 ms. Timing is best-effort, not a precision synchronized acquisition system.
 
 The wrist uses `Wire.begin()` with the selected board's default SDA/SCL, matching its original hardware test. Its DRV2605L drives the existing ERM motor. If the driver is missing, the program continues with serial alerts and explicitly reports no motor command.
 
 Verified compilation configuration:
 
 - Arduino CLI 1.3.1, Espressif Arduino core **2.0.17**.
-- Foot: `esp32:esp32:XIAO_ESP32C3`.
+- Foot: both `esp32:esp32:XIAO_ESP32C3` and `esp32:esp32:adafruit_feather_esp32s3_nopsram`.
 - Wrist: `esp32:esp32:adafruit_feather_esp32s3_nopsram`, matching the No PSRAM selection shown in the team's IDE screenshot. Use the actual board variant if different.
 - Adafruit LSM6DS 4.7.4, Adafruit DRV2605 Library 1.2.4, Adafruit Unified Sensor 1.1.15, Adafruit BusIO 1.17.4.
 
@@ -87,3 +89,10 @@ g++ -std=c++11 -Wall -Wextra -Werror -pedantic firmware/tests/hand_motion_test.c
 ```
 
 Physical BLE reconnection, gesture repeatability, and motor output still require bench validation. This version does not implement stance/swing duration, impact analysis, bilateral comparison, the dashboard adapter, or running foot-strike extraction. An actual running evaluation must replace/validate the bench gesture extractor and retune the research parameters using real running data.
+
+## Compilation troubleshooting
+
+- `D4` / `D5` not declared: an older foot sketch used XIAO-specific aliases. Update to this revision, or replace `Wire.begin(D4, D5)` with `Wire.begin()` in that sketch, and confirm the actual wiring matches the selected board's defaults.
+- `Adafruit_DRV2605.h: No such file or directory`: install **Adafruit DRV2605 Library** by Adafruit from Arduino Library Manager, including dependencies. Do not change the include filename.
+- `Adafruit_LSM6DS3TRC.h: No such file or directory`: install **Adafruit LSM6DS** by Adafruit, including Adafruit Unified Sensor and Adafruit BusIO dependencies.
+- A successful serial monitor connection alone does not establish board identity or a successful upload. Confirm the actual board model or the chip reported by the upload tool.
