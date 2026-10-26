@@ -17,7 +17,7 @@ ECE 590 running-gait monitoring prototype: a shoe-mounted IMU and XIAO ESP32-C3 
 
 Follow the [two-window hand-motion guide](firmware/HAND_MOTION_TEST.md). Open `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` in the foot window and `firmware/wrist_hand_motion_test/wrist_hand_motion_test.ino` in the wrist window. Upload both to their actual boards. Keep all accompanying headers in their respective sketch folders.
 
-This test reads the real foot IMU and sends gesture events over BLE; it does not require a command to generate abnormal data. After `LINK_READY`, send `r` to the wrist, perform about 31 evenly spaced move-and-hold gestures to establish 30 timing intervals, then vary the gesture timing to test the alert. Use 115200 baud. It is a hand-motion bench test, not validated running-gait detection.
+This test reads the real foot IMU and sends gesture events over BLE; it does not require a command to generate abnormal data. After `LINK_READY`, send `r` to the wrist, perform about 31 evenly spaced move-and-hold gestures to establish 30 timing intervals, then vary the gesture timing to test the alert. Use 115200 baud. It is a hand-motion bench test, not validated running-gait detection. Pauses and missing events now preserve calibration progress and the baseline; only valid intervals count. Use `r` to deliberately start over. If updating the older downloaded revision by hand, see the [copy/paste calibration fix](firmware/CALIBRATION_QUICK_FIX.md).
 
 ## Optional synthetic-input algorithm simulation
 

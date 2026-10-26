@@ -28,7 +28,7 @@ struct SensorRunner {
       HandTest::Packet decoded;
       check(HandTest::decode(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet), decoded), "Protocol failed");
       auto decision = tracker.accept(decoded);
-      if (decision.resetTiming) timing.reset();
+      if (decision.resetTiming) timing.interrupt();
       if (decision.event && timing.observeStride(decoded.timestampMs).alert) ++alerts;
     }
     now += 10;
@@ -92,7 +92,7 @@ int main() {
       auto next = t.accept(packet(HandTest::Heartbeat, 1, 0));
       check(!first.event && !next.event && !next.resetTiming, "Heartbeat triggered event");
     });
-    test("lost events and foot restart invalidate the baseline", [] {
+    test("lost events and foot restart invalidate timing continuity", [] {
       HandEventTracker t; t.accept(packet(HandTest::Heartbeat, 1, 0));
       auto one = t.accept(packet(HandTest::Gesture, 1, 1));
       auto three = t.accept(packet(HandTest::Gesture, 1, 3));

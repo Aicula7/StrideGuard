@@ -87,12 +87,52 @@ int main() {
       auto result = r.step(750);
       check(result.accepted && result.intervalMs == 750, "Bounce corrupted interval");
     });
-    test("long gap invalidates the window and restarts calibration", [] {
-      Runner r; r.calibrate(); r.feed(unstable, 5, 5);
+    test("long gap retains baseline and discards pending alert evidence", [] {
+      Runner r; const auto baseline = r.calibrate(); r.feed(unstable, 5, 5);
       auto gap = r.step(5000);
-      check(gap.gapReset && !gap.alert && !r.detector.calibrated(), "Gap treated as gait");
-      r.calibrate();
-      check(r.detector.calibrated() && r.alerts == 0, "Recalibration failed");
+      check(gap.gapReset && !gap.alert && r.detector.calibrated(), "Gap erased baseline");
+      check(gap.state == Detector::State::Waiting && gap.baselineCv == baseline.baselineCv, "Invalid idle state");
+      const auto resumed = r.feed(normal, 5, 5);
+      check(resumed.state == Detector::State::Stable && r.alerts == 0, "Resume incorrectly alerted");
+    });
+    test("a 2681 ms interval keeps the user's 11 calibration intervals", [] {
+      Runner r; r.feed(normal, 5, 11);
+      check(r.detector.baselineIntervals() == 11, "Setup did not collect eleven intervals");
+      const auto gap = r.step(2681);
+      check(gap.gapReset && !gap.accepted && r.detector.baselineIntervals() == 11, "Observed pause erased progress");
+      r.step(1000);
+      check(r.detector.baselineIntervals() == 12, "Valid interval after pause not collected");
+    });
+    test("explicit idle interruption retains a partial calibration window", [] {
+      Runner r; r.feed(normal, 5, 19);
+      r.detector.interrupt();
+      check(r.detector.baselineIntervals() == 19, "Partial window lost");
+      auto reference = r.step(10000);
+      check(reference.referenceOnly && !reference.accepted && r.detector.baselineIntervals() == 19, "Pause counted as a sample");
+      const auto complete = r.feed(normal, 5, 11);
+      check(complete.justCalibrated && r.detector.baselineIntervals() == 30, "Segmented calibration failed");
+      check(r.alerts == 0, "Calibration interruption alerted");
+    });
+    test("interruptions cannot combine separated high windows into an alert", [] {
+      Runner r; r.calibrate(); r.feed(unstable, 5, 5);
+      r.detector.interrupt(); r.step(5000);
+      auto first = r.feed(unstable, 5, 5);
+      check(first.state == Detector::State::Suspect && r.alerts == 0, "Evidence crossed interruption");
+      auto second = r.feed(unstable, 5, 5);
+      check(second.alert && r.alerts == 1, "Fresh sustained episode missing");
+    });
+    test("foot clock restart keeps baseline without reusing the old event time", [] {
+      Runner r; r.calibrate();
+      r.detector.interrupt(true); r.time = 100;
+      auto reference = r.detector.observeStride(r.time);
+      check(reference.referenceOnly && r.detector.baselineIntervals() == 30, "Clock restart cleared baseline");
+      auto resumed = r.feed(normal, 5, 5);
+      check(resumed.state == Detector::State::Stable && r.alerts == 0, "Clock restart corrupted timing");
+    });
+    test("manual reset still clears partial and completed calibration", [] {
+      Runner r; r.calibrate(); r.detector.reset();
+      check(!r.detector.calibrated() && r.detector.baselineIntervals() == 0, "Manual reset retained calibration");
+      check(r.detector.state() == Detector::State::Calibrating, "Manual reset state incorrect");
     });
     test("event timestamp rollover preserves valid intervals", [] {
       Runner r(UINT32_MAX - 1000);

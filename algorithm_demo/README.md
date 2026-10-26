@@ -27,7 +27,7 @@ Type a command into Serial Monitor and press Enter. Either uppercase or lowercas
 | `n` | Normal intervals: 750, 760, 740, 755, 745 ms | Remain stable; after an unstable episode, recover after two low windows |
 | `u` | Sustained irregular intervals: 500, 1000, 550, 950, 750 ms | Become `SUSPECT`, then `UNSTABLE` and emit `ALERT` after two high windows |
 | `s` | One 1100 ms interval, followed by normal timing | A single disturbed window should not produce an alert when starting from stable normal timing |
-| `p` | Pause/resume | Pause generation; resuming starts a new normal calibration |
+| `p` | Pause/resume | Pause generation while retaining valid calibration progress and the learned baseline |
 | `r` | Reset | Start a new normal calibration |
 | `v` | Manual output test | Exercise the output independently of the detector |
 | `?` | Help | Print commands and CSV column names |
@@ -39,9 +39,9 @@ Output is CSV with `#` comment lines. `NA` means no complete window is available
 ## Algorithm
 
 1. Accept one timestamp for each successive strike of the **same foot**. Calculate interval using unsigned millisecond subtraction.
-2. Ignore duplicate/short intervals below 350 ms. An interval over 2500 ms invalidates the current window and restarts calibration; it is treated as a gap, not instability. These bounds are configurable prototype assumptions.
+2. Ignore duplicate/short intervals below 350 ms. An interval over 2500 ms is excluded as a gap. Calibration progress and the learned baseline are retained; monitoring evidence is cleared and the next interval uses a fresh reference. These bounds are configurable prototype assumptions.
 3. Use non-overlapping windows of five intervals. Calculate population standard deviation divided by mean, multiplied by 100: `CV = SD / mean * 100`.
-4. Calibrate on six normal windows (30 intervals). Baseline CV is the mean of those six window CV values. It remains fixed until reset or a gap.
+4. Calibrate on six normal windows (30 intervals). Baseline CV is the mean of those six window CV values. It remains fixed until explicit reset or device restart. Valid calibration intervals may accumulate across interrupted segments; no interval crossing a gap is counted.
 5. Experimental entry threshold: `max(2 * baselineCV, baselineCV + 3 percentage points)`. Require two consecutive high windows before entering `UNSTABLE`.
 6. Experimental recovery threshold: `max(1.5 * baselineCV, baselineCV + 1.5 percentage points)`. Require two consecutive low windows to recover.
 7. Emit one alert on entry, with a 10-second simulation-clock cooldown. An entry during cooldown changes the state without producing another motor command. Continued instability does not repeatedly vibrate.
@@ -67,7 +67,7 @@ This experiment does not implement stance/swing duration, impact analysis, bilat
 
 ## Validation
 
-The portable detector has 11 automated C++ tests for calibration, normal timing, transient disturbances, sustained instability, recovery, a steady pace change, rejected duplicate events, gaps, timestamp rollover, baseline adaptation, and cooldown.
+The portable detector has 16 automated C++ tests for calibration, normal timing, transient disturbances, sustained instability, recovery, a steady pace change, rejected duplicate events, gaps, timestamp rollover, baseline adaptation, cooldown, partial calibration retention, foot-clock restart, and isolation of alert evidence across pauses.
 
 From the repository root on a machine with a C++11 compiler:
 

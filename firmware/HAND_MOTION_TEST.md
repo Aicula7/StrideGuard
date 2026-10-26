@@ -46,10 +46,11 @@ Send **`r` to the wrist** to clear timing history. Make separate gestures at a s
 
 - The first event provides a reference timestamp.
 - The next **30 intervals** build the baseline: approximately 31 gestures / 30 seconds at this pace.
-- Wrist output shows `CALIBRATION intervals=.../30` and then `BASELINE_READY`.
+- Wrist output explicitly shows `CALIBRATION intervals=30/30` and then `BASELINE_READY`. Periodic `STATUS` lines include `baseline=.../30`, received event count, pause count, and the most recent pause reason.
+- Pauses preserve all valid calibration intervals already collected, including a partial five-interval calibration window. On resume, the first event establishes a new reference and does not count as an interval. Thirty valid intervals are still required; pauses are never filled with invented data.
 - If `BASELINE_NOISY` appears, use `r` and repeat with more even timing. A noisy baseline raises the detection threshold.
 
-Keep gesture shape and strength similar, but make the **intervals** uneven: for example alternate about 0.5 seconds and 1.4 seconds. Do not stop for several seconds. After two high-variability, non-overlapping five-interval windows, wrist output becomes `UNSTABLE` and prints `HAND_TIMING_ALERT`; an initialized driver also receives the vibration command.
+Keep gesture shape and strength similar, but make the **intervals** uneven: for example alternate about 0.5 seconds and 1.4 seconds. You may pause to inspect logs without losing the baseline. After resuming, use a fresh uninterrupted sequence of gestures: two high-variability, non-overlapping five-interval windows are still required before wrist output becomes `UNSTABLE` and prints `HAND_TIMING_ALERT`; an initialized driver also receives the vibration command.
 
 Return to even, roughly one-second gestures. Expect recovery after two complete low-variability windows; allow about 10-15 regular gestures if a transition window is mixed. Continued irregularity does not repeatedly vibrate; alerts occur on entry with cooldown.
 
@@ -70,16 +71,18 @@ Check the foot `SENSOR` lines first if gestures are missed. `armed=0` during con
 
 - Only gesture packets feed the timing detector. Heartbeats do not become fake steps.
 - A 20-byte versioned packet carries a boot identity, event sequence, foot timestamp, and measured motion magnitudes. The boot identity is random only to identify a restarted foot; motion data are not random.
-- Sequence gaps, a foot restart, a receive-queue overflow, or disconnection reset timing calibration.
+- Sequence gaps, a foot restart, a receive-queue overflow, or disconnection clear the event-time reference and pending alert evidence while preserving valid calibration progress and the learned baseline. No interval is calculated across missing data.
 - No valid packet for 2.5 seconds triggers reconnection, not a gait alert.
-- No gestures for 2.8 seconds, or an event interval over 2.5 seconds, resets the baseline. Resume a regular sequence to calibrate again. The wrist can still receive healthy heartbeat packets while the foot is stationary.
+- No gestures for 2.8 seconds marks a pause and preserves calibration. An observed interval over 2.5 seconds is excluded, also without clearing calibration. Resume regular gestures to continue collecting valid intervals. The wrist can still receive healthy heartbeats while the foot is stationary.
+- Once calibrated, a pause produces `WAITING_FOR_MOTION`; the next reference event and five valid intervals are needed for a fresh monitoring window. Evidence from opposite sides of a gap cannot be combined into an alert.
+- Only `r` or restarting/reflashing the wrist clears its RAM baseline. It is not stored across wrist power loss. Recalibrate deliberately if the intended normal motion pattern changes.
 - The baseline uses foot event timestamps, not BLE arrival timing.
 
 Wrist commands are **`r`** (recalibrate), **`v`** (manual motor test), and **`?`** (help). There is no `u` command to manufacture abnormal input in this real-foot version.
 
 ## Validation and remaining limits
 
-Both new sketches successfully compiled for the listed ESP32 targets. Fourteen additional portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, and nonfinite inputs. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The original detector's 11 tests remain separate.
+Both new sketches successfully compiled for the listed ESP32 targets. Fourteen additional portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, and nonfinite inputs. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The shared detector's 16 tests include the reported 2681 ms gap, segmented calibration, baseline retention, explicit reset, and alert-evidence isolation across pauses. A separate minimal patch for the downloaded e246574 revision is documented in [CALIBRATION_QUICK_FIX.md](CALIBRATION_QUICK_FIX.md).
 
 Run the hand-motion tests from the repository root on a machine with a C++11 compiler:
 
@@ -88,7 +91,7 @@ g++ -std=c++11 -Wall -Wextra -Werror -pedantic firmware/tests/hand_motion_test.c
 /tmp/hand_motion_test
 ```
 
-Physical BLE reconnection, gesture repeatability, and motor output still require bench validation. This version does not implement stance/swing duration, impact analysis, bilateral comparison, the dashboard adapter, or running foot-strike extraction. An actual running evaluation must replace/validate the bench gesture extractor and retune the research parameters using real running data.
+Team logs confirm basic real-foot event reception. The updated pause handling and physical motor behavior still need verification on the actual devices. This version does not implement stance/swing duration, impact analysis, bilateral comparison, the dashboard adapter, or running foot-strike extraction. An actual running evaluation must replace/validate the bench gesture extractor and retune the research parameters using real running data.
 
 ## Compilation troubleshooting
 

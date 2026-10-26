@@ -2,12 +2,12 @@
 #include "HandTestProtocol.h"
 
 // Separates actual gesture events from heartbeats and rejects duplicates.
-// Missing events and foot restarts invalidate timing history.
+// Missing events and foot restarts break timing continuity; callers retain calibration.
 class HandEventTracker {
  public:
   struct Decision {
     bool event = false;
-    bool resetTiming = false;
+    bool resetTiming = false;  // Break the time reference, not the saved baseline.
     uint32_t missed = 0;
   };
   void reset() { seen_ = false; }

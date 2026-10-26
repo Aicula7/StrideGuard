@@ -16,10 +16,11 @@ class GaitStabilityDetector {
   static constexpr uint32_t CooldownMs = 10000;
   static constexpr uint32_t MinStrideMs = 350;
   static constexpr uint32_t MaxStrideMs = 2500;
-  enum class State { Calibrating, Stable, Suspect, Unstable };
+  enum class State { Calibrating, Waiting, Stable, Suspect, Unstable };
 
   struct Result {
     bool accepted = false;
+    bool referenceOnly = false;
     bool windowComplete = false;
     bool justCalibrated = false;
     bool gapReset = false;
@@ -46,6 +47,7 @@ class GaitStabilityDetector {
     high_ = 0;
     low_ = 0;
     unstable_ = false;
+    monitoringReady_ = false;
     hasPrevious_ = false;
     hasAlert_ = false;
     previousMs_ = 0;
@@ -54,8 +56,30 @@ class GaitStabilityDetector {
 
   bool calibrated() const { return baselineCount_ == BaselineWindows; }
 
+  size_t baselineIntervals() const {
+    return baselineCount_ * WindowSize + (calibrated() ? 0 : count_);
+  }
+
+  // A pause or missing packet breaks timing continuity, not calibration.
+  // Keep partial/complete calibration windows made from valid intervals.
+  // After calibration, discard incomplete monitoring windows and pending
+  // alert evidence so separate motion segments cannot combine into an alert.
+  void interrupt(bool clockRestarted = false) {
+    hasPrevious_ = false;
+    high_ = 0;
+    low_ = 0;
+    unstable_ = false;
+    monitoringReady_ = false;
+    if (calibrated()) count_ = 0;
+    if (clockRestarted) {
+      hasAlert_ = false;
+      lastAlertMs_ = 0;
+    }
+  }
+
   State state() const {
     if (!calibrated()) return State::Calibrating;
+    if (!monitoringReady_) return State::Waiting;
     if (unstable_) return State::Unstable;
     return high_ ? State::Suspect : State::Stable;
   }
@@ -67,6 +91,7 @@ class GaitStabilityDetector {
     if (!hasPrevious_) {
       previousMs_ = timestampMs;
       hasPrevious_ = true;
+      out.referenceOnly = true;
       return out;
     }
     const uint32_t interval = timestampMs - previousMs_;
@@ -74,8 +99,8 @@ class GaitStabilityDetector {
     if (interval < MinStrideMs) return out;  // Ignore bounce/duplicates.
     previousMs_ = timestampMs;
     if (interval > MaxStrideMs) {
-      // Do not classify a pause or missing events as unstable gait.
-      reset();
+      // Exclude this interval without erasing valid baseline samples.
+      interrupt();
       previousMs_ = timestampMs;
       hasPrevious_ = true;
       out = snapshot();
@@ -110,8 +135,10 @@ class GaitStabilityDetector {
         enterCv_ = fmaxf(2.0f * baselineCv_, baselineCv_ + 3.0f);
         exitCv_ = fmaxf(1.5f * baselineCv_, baselineCv_ + 1.5f);
         out.justCalibrated = true;
+        monitoringReady_ = true;
       }
     } else if (!unstable_) {
+      monitoringReady_ = true;
       high_ = out.cvPercent > enterCv_ ? high_ + 1 : 0;
       low_ = 0;
       if (high_ >= EnterWindows) {
@@ -145,6 +172,7 @@ class GaitStabilityDetector {
       case State::Stable: return "STABLE";
       case State::Suspect: return "SUSPECT";
       case State::Unstable: return "UNSTABLE";
+      case State::Waiting: return "WAITING_FOR_MOTION";
       default: return "CALIBRATING";
     }
   }
@@ -170,6 +198,7 @@ class GaitStabilityDetector {
   uint8_t high_ = 0;
   uint8_t low_ = 0;
   bool unstable_ = false;
+  bool monitoringReady_ = false;
   bool hasPrevious_ = false;
   uint32_t previousMs_ = 0;
   bool hasAlert_ = false;

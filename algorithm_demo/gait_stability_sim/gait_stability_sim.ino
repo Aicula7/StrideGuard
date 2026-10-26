@@ -92,9 +92,12 @@ void handleCommand(char command) {
     case 'p': case 'P':
       paused = !paused;
       if (paused) {
-        Serial.println("# PAUSED: no simulated measurements; detector is not evaluating gait.");
+        detector.interrupt();
+        Serial.println("# PAUSED: valid calibration progress and baseline retained.");
       } else {
-        resetSimulation();
+        detector.observeStride(simulatedTimeMs);
+        scheduleNext();
+        Serial.println("# RESUMED: next generated event provides a fresh interval.");
       }
       break;
     case 'r': case 'R': resetSimulation(); break;

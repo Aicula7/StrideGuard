@@ -33,16 +33,44 @@ uint32_t nextScanAt = 0;
 uint32_t lastStatusAt = 0;
 uint32_t reportedDrops = 0;
 bool eventSeen = false;
+uint32_t eventsReceived = 0;
+uint32_t pauseCount = 0;
+const char* lastPauseReason = "NONE";
+bool haveFootSession = false;
+uint32_t lastFootSession = 0;
+
+void printCalibrationProgress() {
+  Serial.printf("# CALIBRATION intervals=%u/30 baseline_ready=%d\n",
+      static_cast<unsigned>(timing.baselineIntervals()), timing.calibrated() ? 1 : 0);
+}
 
 void resetTiming(const char* reason) {
   timing.reset();
   eventSeen = false;
+  eventsReceived = 0;
+  pauseCount = 0;
+  lastPauseReason = "MANUAL_RESET";
   Serial.println(reason);
+  printCalibrationProgress();
 }
 
 void resetReception(const char* reason) {
   resetTiming(reason);
   tracker.reset();
+  if (rxQueue) xQueueReset(rxQueue);
+}
+
+void pauseTiming(const char* reason, bool clockRestarted) {
+  timing.interrupt(clockRestarted);
+  eventSeen = false;
+  ++pauseCount;
+  lastPauseReason = reason;
+  Serial.printf("# TIMING_PAUSED reason=%s baseline_kept=%u/30. Next event is a new time reference.\n",
+      reason, static_cast<unsigned>(timing.baselineIntervals()));
+}
+
+void pauseReception(const char* reason) {
+  pauseTiming(reason, false);
   if (rxQueue) xQueueReset(rxQueue);
 }
 
@@ -111,25 +139,35 @@ bool connectFoot() {
 
 void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
   lastPacketAt = arrivedAt;
+  const bool footRestarted = haveFootSession && packet.bootSession != lastFootSession;
+  haveFootSession = true;
+  lastFootSession = packet.bootSession;
   const auto decision = tracker.accept(packet);
   if (decision.resetTiming) {
-    resetTiming("# FOOT_SESSION_OR_EVENT_GAP: restarting motion-timing baseline.");
+    if (footRestarted) pauseTiming("FOOT_RESTART", true);
+    else if (decision.missed) pauseTiming("MISSING_EVENTS", false);
     if (decision.missed) Serial.printf("# Missed events: %lu\n", static_cast<unsigned long>(decision.missed));
   }
   if (!decision.event) return;  // Heartbeats are never treated as motion events.
   eventSeen = true;
   lastEventAt = arrivedAt;
+  ++eventsReceived;
   const auto result = timing.observeStride(packet.timestampMs);
   Serial.printf("# REAL_HAND_EVENT seq=%lu foot_ms=%lu dev_mps2=%.2f gyro_rps=%.2f state=%s\n",
       static_cast<unsigned long>(packet.sequence), static_cast<unsigned long>(packet.timestampMs),
       packet.accelerationDeviationCenti / 100.0f, packet.angularRateCenti / 100.0f,
       GaitStabilityDetector::stateName(result.state));
-  if (result.gapReset) Serial.println("# MOTION_INTERVAL_GAP: a pause is not classified as unstable motion.");
-  if (!timing.calibrated()) {
-    const size_t intervals = result.baselineWindows * GaitStabilityDetector::WindowSize +
-                            (result.windowComplete ? 0 : result.windowCount);
-    Serial.printf("# CALIBRATION intervals=%u/30. Keep a steady rhythm.\n", static_cast<unsigned>(intervals));
+  if (result.gapReset) {
+    ++pauseCount;
+    lastPauseReason = "LONG_INTERVAL";
+    Serial.printf("# INTERVAL_SKIPPED ms=%lu baseline_kept=%u/30. Pause is not an instability alert.\n",
+        static_cast<unsigned long>(result.intervalMs), static_cast<unsigned>(timing.baselineIntervals()));
   }
+  if (result.referenceOnly) Serial.println("# REFERENCE_EVENT: next valid event provides an interval; baseline retained.");
+  if (!result.accepted && !result.referenceOnly && !result.gapReset) {
+    Serial.printf("# INTERVAL_SKIPPED too_short_ms=%lu\n", static_cast<unsigned long>(result.intervalMs));
+  }
+  if (!timing.calibrated() || result.justCalibrated) printCalibrationProgress();
   if (result.windowComplete) {
     Serial.printf("# WINDOW mean_ms=%.1f cv_pct=%.2f baseline_cv_pct=%.2f enter_cv_pct=%.2f state=%s\n",
         result.meanMs, result.cvPercent, result.baselineCv, result.enterCv,
@@ -151,7 +189,8 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
 void printHelp() {
   Serial.println("# MANUAL_HAND_TEST: wrist receives real FOOT IMU gesture events, no synthetic input.");
   Serial.println("# r: restart timing calibration; v: manual motor test; ?: help");
-  Serial.println("# Wrist IMU is not used for this bench test. No-motion or lost-data states reset timing, not alert.");
+  Serial.println("# Pauses/lost data keep valid calibration samples and baseline; only r or wrist restart clears them.");
+  Serial.println("# A skipped interval never counts toward calibration. Wrist IMU is not used for this bench test.");
 }
 
 void setup() {
@@ -194,7 +233,7 @@ void loop() {
   }
   if (resetLink.exchange(false)) {
     subscribed = false;
-    resetReception("# DISCONNECTED: timing invalidated; reconnecting.");
+    pauseReception("DISCONNECTED");
   }
   if (!linkUp.load() || !subscribed) {
     if (static_cast<int32_t>(now - nextScanAt) >= 0) {
@@ -207,7 +246,7 @@ void loop() {
   const uint32_t drops = queueDrops.load();
   if (drops != reportedDrops) {
     reportedDrops = drops;
-    resetReception("# RECEIVE_OVERFLOW: timing invalidated, recalibration required.");
+    pauseReception("RECEIVE_OVERFLOW");
   }
   ReceivedPacket received;
   while (xQueueReceive(rxQueue, &received, 0) == pdTRUE) {
@@ -215,16 +254,19 @@ void loop() {
   }
   now = millis();
   if (now - lastPacketAt > 2500) {
-    resetReception("# NO_FOOT_DATA: not a motion alert; reconnecting.");
+    pauseReception("NO_FOOT_DATA");
     subscribed = false;
     client->disconnect();
   } else if (eventSeen && now - lastEventAt > 2800) {
-    resetTiming("# NO_MOTION: baseline reset. Resume regular gestures to calibrate again.");
+    pauseTiming("NO_MOTION", false);
   }
   if (now - lastStatusAt >= 2000) {
     lastStatusAt = now;
-    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s\n", linkUp.load() ? 1 : 0,
-        static_cast<unsigned long>(now - lastPacketAt), GaitStabilityDetector::stateName(timing.state()));
+    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s baseline=%u/30 activity=%s events_rx=%lu pauses=%lu last_pause=%s\n",
+        linkUp.load() ? 1 : 0, static_cast<unsigned long>(now - lastPacketAt),
+        GaitStabilityDetector::stateName(timing.state()), static_cast<unsigned>(timing.baselineIntervals()),
+        eventSeen ? "ACTIVE" : "IDLE", static_cast<unsigned long>(eventsReceived),
+        static_cast<unsigned long>(pauseCount), lastPauseReason);
   }
   delay(1);
 }
