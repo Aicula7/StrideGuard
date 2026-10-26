@@ -23,7 +23,7 @@ struct Runner {
     for (int i = 0; i < count; ++i) result = step(pattern[i % length]);
     return result;
   }
-  Detector::Result calibrate() { return feed(normal, 5, 30); }
+  Detector::Result calibrate() { return feed(normal, 5, Detector::BaselineIntervalTarget); }
 };
 void check(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
@@ -36,11 +36,12 @@ template<class F> void test(const char* name, F body) {
 }
 int main() {
   try {
-    test("30-interval calibration and baseline-relative thresholds", [] {
+    test("15-interval calibration and baseline-relative thresholds", [] {
+      check(Detector::BaselineIntervalTarget == 15, "Bench target must be fifteen intervals");
       Runner r;
-      r.feed(normal, 5, 29);
+      r.feed(normal, 5, Detector::BaselineIntervalTarget - 1);
       check(!r.detector.calibrated(), "Calibration completed too early");
-      auto result = r.step(normal[4]);
+      auto result = r.step(normal[(Detector::BaselineIntervalTarget - 1) % 5]);
       check(result.justCalibrated && r.detector.calibrated(), "Calibration did not complete");
       check(result.baselineCv > 0.9f && result.baselineCv < 1.0f, "Unexpected baseline CV");
       check(result.enterCv > result.exitCv && result.exitCv > result.baselineCv, "Invalid hysteresis");
@@ -104,13 +105,13 @@ int main() {
       check(r.detector.baselineIntervals() == 12, "Valid interval after pause not collected");
     });
     test("explicit idle interruption retains a partial calibration window", [] {
-      Runner r; r.feed(normal, 5, 19);
+      Runner r; r.feed(normal, 5, Detector::BaselineIntervalTarget - 1);
       r.detector.interrupt();
-      check(r.detector.baselineIntervals() == 19, "Partial window lost");
+      check(r.detector.baselineIntervals() == Detector::BaselineIntervalTarget - 1, "Partial window lost");
       auto reference = r.step(10000);
-      check(reference.referenceOnly && !reference.accepted && r.detector.baselineIntervals() == 19, "Pause counted as a sample");
-      const auto complete = r.feed(normal, 5, 11);
-      check(complete.justCalibrated && r.detector.baselineIntervals() == 30, "Segmented calibration failed");
+      check(reference.referenceOnly && !reference.accepted && r.detector.baselineIntervals() == Detector::BaselineIntervalTarget - 1, "Pause counted as a sample");
+      const auto complete = r.step(normal[(Detector::BaselineIntervalTarget - 1) % 5]);
+      check(complete.justCalibrated && r.detector.baselineIntervals() == Detector::BaselineIntervalTarget, "Segmented calibration failed");
       check(r.alerts == 0, "Calibration interruption alerted");
     });
     test("interruptions cannot combine separated high windows into an alert", [] {
@@ -125,7 +126,7 @@ int main() {
       Runner r; r.calibrate();
       r.detector.interrupt(true); r.time = 100;
       auto reference = r.detector.observeStride(r.time);
-      check(reference.referenceOnly && r.detector.baselineIntervals() == 30, "Clock restart cleared baseline");
+      check(reference.referenceOnly && r.detector.baselineIntervals() == Detector::BaselineIntervalTarget, "Clock restart cleared baseline");
       auto resumed = r.feed(normal, 5, 5);
       check(resumed.state == Detector::State::Stable && r.alerts == 0, "Clock restart corrupted timing");
     });
@@ -143,7 +144,7 @@ int main() {
       Runner a; auto low = a.calibrate();
       Runner b;
       const uint32_t variable[] = {700, 800, 750, 775, 725};
-      auto high = b.feed(variable, 5, 30);
+      auto high = b.feed(variable, 5, Detector::BaselineIntervalTarget);
       check(high.enterCv > low.enterCv && high.baselineCv > low.baselineCv, "Threshold is not personalized");
     });
     test("new episode inside cooldown changes state without another alert", [] {

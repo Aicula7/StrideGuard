@@ -10,7 +10,8 @@
 class GaitStabilityDetector {
  public:
   static constexpr size_t WindowSize = 5;
-  static constexpr size_t BaselineWindows = 6;  // 30 stride intervals.
+  static constexpr size_t BaselineWindows = 3;  // Short initial bench calibration.
+  static constexpr size_t BaselineIntervalTarget = WindowSize * BaselineWindows;
   static constexpr uint8_t EnterWindows = 2;
   static constexpr uint8_t ExitWindows = 2;
   static constexpr uint32_t CooldownMs = 10000;

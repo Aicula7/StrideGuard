@@ -40,8 +40,9 @@ bool haveFootSession = false;
 uint32_t lastFootSession = 0;
 
 void printCalibrationProgress() {
-  Serial.printf("# CALIBRATION intervals=%u/30 baseline_ready=%d\n",
-      static_cast<unsigned>(timing.baselineIntervals()), timing.calibrated() ? 1 : 0);
+  Serial.printf("# CALIBRATION intervals=%u/%u baseline_ready=%d\n",
+      static_cast<unsigned>(timing.baselineIntervals()),
+      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget), timing.calibrated() ? 1 : 0);
 }
 
 void resetTiming(const char* reason) {
@@ -65,8 +66,9 @@ void pauseTiming(const char* reason, bool clockRestarted) {
   eventSeen = false;
   ++pauseCount;
   lastPauseReason = reason;
-  Serial.printf("# TIMING_PAUSED reason=%s baseline_kept=%u/30. Next event is a new time reference.\n",
-      reason, static_cast<unsigned>(timing.baselineIntervals()));
+  Serial.printf("# TIMING_PAUSED reason=%s baseline_kept=%u/%u. Next event is a new time reference.\n",
+      reason, static_cast<unsigned>(timing.baselineIntervals()),
+      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
 }
 
 void pauseReception(const char* reason) {
@@ -160,8 +162,9 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
   if (result.gapReset) {
     ++pauseCount;
     lastPauseReason = "LONG_INTERVAL";
-    Serial.printf("# INTERVAL_SKIPPED ms=%lu baseline_kept=%u/30. Pause is not an instability alert.\n",
-        static_cast<unsigned long>(result.intervalMs), static_cast<unsigned>(timing.baselineIntervals()));
+    Serial.printf("# INTERVAL_SKIPPED ms=%lu baseline_kept=%u/%u. Pause is not an instability alert.\n",
+        static_cast<unsigned long>(result.intervalMs), static_cast<unsigned>(timing.baselineIntervals()),
+        static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
   }
   if (result.referenceOnly) Serial.println("# REFERENCE_EVENT: next valid event provides an interval; baseline retained.");
   if (!result.accepted && !result.referenceOnly && !result.gapReset) {
@@ -191,6 +194,8 @@ void printHelp() {
   Serial.println("# r: restart timing calibration; v: manual motor test; ?: help");
   Serial.println("# Pauses/lost data keep valid calibration samples and baseline; only r or wrist restart clears them.");
   Serial.println("# A skipped interval never counts toward calibration. Wrist IMU is not used for this bench test.");
+  Serial.printf("# Calibration target: %u valid intervals. First event is a time reference.\n",
+      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
 }
 
 void setup() {
@@ -262,9 +267,10 @@ void loop() {
   }
   if (now - lastStatusAt >= 2000) {
     lastStatusAt = now;
-    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s baseline=%u/30 activity=%s events_rx=%lu pauses=%lu last_pause=%s\n",
+    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s baseline=%u/%u activity=%s events_rx=%lu pauses=%lu last_pause=%s\n",
         linkUp.load() ? 1 : 0, static_cast<unsigned long>(now - lastPacketAt),
         GaitStabilityDetector::stateName(timing.state()), static_cast<unsigned>(timing.baselineIntervals()),
+        static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget),
         eventSeen ? "ACTIVE" : "IDLE", static_cast<unsigned long>(eventsReceived),
         static_cast<unsigned long>(pauseCount), lastPauseReason);
   }

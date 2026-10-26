@@ -26,7 +26,9 @@ void printHelp() {
   Serial.println("# SIMULATION ONLY: generated same-foot strike timestamps, not IMU measurements.");
   Serial.println("# n: normal/recovery; u: sustained unstable timing; s: one disturbed interval");
   Serial.println("# p: pause/resume; r: reset/calibrate; v: manual output test; ?: help");
-  Serial.println("# Calibration: 30 normal intervals, about 22.5 seconds.");
+  Serial.printf("# Calibration: %u normal intervals, about %.1f seconds.\n",
+      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget),
+      0.75 * GaitStabilityDetector::BaselineIntervalTarget);
   Serial.println("# Monitoring: 5 intervals per non-overlapping window; 2 high windows to alert.");
   Serial.println("# Thresholds are baseline-relative experimental settings, not validated cutoffs.");
   Serial.println("sim_ms,scenario,stride_ms,window_complete,cv_pct,baseline_cv_pct,enter_cv_pct,state,alert");
@@ -66,7 +68,8 @@ void resetSimulation() {
   singleDisturbance = false;
   patternIndex = 0;
   scheduleNext();
-  Serial.println("# RESET: normal scenario; calibrating for about 22.5 seconds.");
+  Serial.printf("# RESET: normal scenario; calibrating %u valid intervals.\n",
+      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
 }
 
 void handleCommand(char command) {

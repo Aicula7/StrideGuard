@@ -42,19 +42,19 @@ Verified compilation configuration:
 
 ## Baseline, disturbance, and recovery
 
-Send **`r` to the wrist** to clear timing history. Make separate gestures at a steady rhythm, about once per second. A one-second metronome can help. Each gesture should include a still hold before the next movement.
+Send **`r` to the wrist** to clear timing history. For the slower hand test, turn over about one second and then hold still for about one second: roughly one gesture every two seconds. A two-second metronome can help. Each gesture should include a still hold before the next movement.
 
 - The first event provides a reference timestamp.
-- The next **30 intervals** build the baseline: approximately 31 gestures / 30 seconds at this pace.
-- Wrist output explicitly shows `CALIBRATION intervals=30/30` and then `BASELINE_READY`. Periodic `STATUS` lines include `baseline=.../30`, received event count, pause count, and the most recent pause reason.
-- Pauses preserve all valid calibration intervals already collected, including a partial five-interval calibration window. On resume, the first event establishes a new reference and does not count as an interval. Thirty valid intervals are still required; pauses are never filled with invented data.
+- The next **15 intervals** build the short initial-test baseline: approximately 16 gestures / 30 seconds at this slower pace. The first gesture is a time reference, not an interval.
+- Wrist output explicitly shows `CALIBRATION intervals=15/15` and then `BASELINE_READY`. Periodic `STATUS` lines include `baseline=.../15`, received event count, pause count, and the most recent pause reason.
+- Pauses preserve all valid calibration intervals already collected, including a partial five-interval calibration window. On resume, the first event establishes a new reference and does not count as an interval. Fifteen valid intervals are still required; pauses are never filled with invented data.
 - If `BASELINE_NOISY` appears, use `r` and repeat with more even timing. A noisy baseline raises the detection threshold.
 
-Keep gesture shape and strength similar, but make the **intervals** uneven: for example alternate about 0.5 seconds and 1.4 seconds. You may pause to inspect logs without losing the baseline. After resuming, use a fresh uninterrupted sequence of gestures: two high-variability, non-overlapping five-interval windows are still required before wrist output becomes `UNSTABLE` and prints `HAND_TIMING_ALERT`; an initialized driver also receives the vibration command.
+Keep gesture shape and strength similar, but make the **intervals** uneven: for example alternate gesture-onset intervals of about 1.2 seconds and 2.2 seconds, with a quiet hold between movements. You may pause to inspect logs without losing the baseline. After resuming, use a fresh uninterrupted sequence of gestures: two high-variability, non-overlapping five-interval windows are still required before wrist output becomes `UNSTABLE` and prints `HAND_TIMING_ALERT`; an initialized driver also receives the vibration command.
 
-Return to even, roughly one-second gestures. Expect recovery after two complete low-variability windows; allow about 10-15 regular gestures if a transition window is mixed. Continued irregularity does not repeatedly vibrate; alerts occur on entry with cooldown.
+Return to even, roughly two-second gesture intervals. Expect recovery after two complete low-variability windows; allow about 10-15 regular gestures if a transition window is mixed. Continued irregularity does not repeatedly vibrate; alerts occur on entry with cooldown.
 
-The exact experimental thresholds are shared with the [synthetic-input detector](../algorithm_demo/README.md). For each five-interval window, `CV = standard deviation / mean * 100`. Baseline CV is the mean of six calibration-window CVs. Entry is `max(2*baselineCV, baselineCV + 3 percentage points)` for two windows; recovery is `max(1.5*baselineCV, baselineCV + 1.5 percentage points)` for two windows. This tests timing consistency, not a universal normal/abnormal running threshold.
+The exact experimental thresholds are shared with the [synthetic-input detector](../algorithm_demo/README.md). For each five-interval window, `CV = standard deviation / mean * 100`. Baseline CV is the mean of three calibration-window CVs (15 valid intervals). This shortened calibration is intended for the initial hand test; longer running-data calibration still needs evaluation. Entry is `max(2*baselineCV, baselineCV + 3 percentage points)` for two windows; recovery is `max(1.5*baselineCV, baselineCV + 1.5 percentage points)` for two windows. This tests timing consistency, not a universal normal/abnormal running threshold.
 
 ## What the gesture extractor does
 
@@ -63,18 +63,19 @@ The foot computes two real quantities:
 - `dev_mps2 = acceleration magnitude - 9.80665`, in m/s^2. This is a simple magnitude-based motion proxy, not full gravity compensation or impact force.
 - `gyro_rps = angular-rate magnitude`, in rad/s.
 
-After a quiet hold of 120 ms (`|dev| < 0.8` and `gyro < 0.30`), the detector arms. The more sensitive bench settings require motion above `|dev| > 1.2` **or** `gyro > 0.50` for at least 20 ms to create one event. Another quiet hold and at least 350 ms since the previous event are required before another can trigger. This supports a deliberate move-and-hold bench gesture; it is not a validated foot-strike extractor.
+After a quiet hold of 120 ms (`|dev| < 0.8` and `gyro < 0.15`), the detector arms. The more sensitive bench settings require motion above `|dev| > 1.2` **or** `gyro > 0.30` for at least 20 ms to create one event. Another quiet hold and at least 350 ms since the previous event are required before another can trigger. This supports a deliberate move-and-hold bench gesture; it is not a validated foot-strike extractor.
 
-For an initial movement, try turning the entire IMU-bearing foot module about 20-30 degrees over 0.3-0.5 seconds, then holding still for about 0.3 seconds. Angle alone is not the trigger: angular speed and acceleration matter. Each turn out or back is a separate intentional gesture; do not immediately return and expect both directions to count as a single action. Establish a baseline with roughly one action per second. Moving only the MCU while the separate IMU stays on the table will not provide the intended input. These values are a starting point for the user's bench test, not measurements validated on their actual movements.
+For an initial movement, try turning the entire IMU-bearing foot module about 20-30 degrees over about one second, then holding still for about one second. There is no 0.3-second deadline: 120 ms is a minimum quiet hold, not a maximum duration. Angle alone is not the trigger: angular speed and acceleration matter. Each turn out or back is a separate intentional gesture; do not immediately return and expect both directions to count as a single action. Establish a baseline with roughly one action every two seconds. Moving only the MCU while the separate IMU stays on the table will not provide the intended input. These values are a starting point for the user's bench test, not measurements validated on their actual movements.
 
-To update an existing foot sketch by hand, only replace these two constants in `HandMotionDetector.h` and upload the foot board again:
+To update an existing foot sketch by hand, use these activation/rearm constants in `HandMotionDetector.h` and upload the foot board again:
 
 ```cpp
 static constexpr float AccelHigh = 1.2f;
-static constexpr float GyroHigh = 0.50f;
+static constexpr float GyroHigh = 0.30f;
+static constexpr float GyroQuiet = 0.15f;
 ```
 
-The quiet, debounce, and 350 ms refractory requirements remain unchanged. After changing extraction thresholds, send `r` once to the wrist and deliberately establish a new baseline with the new event definition.
+The quiet-hold duration (120 ms), debounce (20 ms), and 350 ms refractory requirements remain unchanged. The quiet angular-rate threshold stays below the activation threshold to prevent overlapping definitions. After changing extraction thresholds, send `r` once to the wrist and deliberately establish a new baseline with the new event definition.
 
 Check the foot `SENSOR` lines first if gestures are missed. `armed=0` during continuous movement means there has not been a sufficiently quiet hold. Very slow rotation can remain below the activation threshold. If one intended gesture generates multiple events, simplify it to one movement followed by a hold before tuning the timing algorithm. Threshold constants are in `HandMotionDetector.h`. The complete updated foot sketch also reports one-second `peak_dev_mps2` and `peak_gyro_rps`, so the periodic snapshot no longer hides brief movement peaks. `phase=READY` means it can accept a sufficiently large movement; `NEED_QUIET` means hold still before another gesture; `CONFIRMING` means the 20 ms high-duration check is in progress; `COOLDOWN` means the 350 ms minimum event spacing has not elapsed. Peaks alone do not establish that the required duration or rearm conditions were satisfied.
 
@@ -89,11 +90,13 @@ Check the foot `SENSOR` lines first if gestures are missed. `armed=0` during con
 - Only `r` or restarting/reflashing the wrist clears its RAM baseline. It is not stored across wrist power loss. Recalibrate deliberately if the intended normal motion pattern changes.
 - The baseline uses foot event timestamps, not BLE arrival timing.
 
+To change the target later, edit `BaselineWindows` in `GaitStabilityDetector.h`; `WindowSize=5` and `BaselineWindows=3` produce 15 intervals. The current complete sketch derives progress text from this target. In older hand-edited sketches, change only the literal `/30` display suffix to `/15`; never replace every occurrence of the number `30` because that would also corrupt values such as `3000`.
+
 Wrist commands are **`r`** (recalibrate), **`v`** (manual motor test), and **`?`** (help). There is no `u` command to manufacture abnormal input in this real-foot version.
 
 ## Validation and remaining limits
 
-Both new sketches successfully compiled for the listed ESP32 targets. Nineteen portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, nonfinite inputs, gentle-motion sensitivity, subthreshold rejection, diagnostic phases, and repeated gentle gestures. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The shared detector's 16 tests include the reported 2681 ms gap, segmented calibration, baseline retention, explicit reset, and alert-evidence isolation across pauses. A separate minimal patch for the downloaded e246574 revision is documented in [CALIBRATION_QUICK_FIX.md](CALIBRATION_QUICK_FIX.md).
+Both new sketches successfully compiled for the listed ESP32 targets. Twenty-one portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, nonfinite inputs, gentle-motion sensitivity, subthreshold rejection, diagnostic phases, repeated gentle gestures, one-second rotations with one-second holds, and exact completion after 15 intervals. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The shared detector's 16 tests include the reported 2681 ms gap, segmented calibration, baseline retention, explicit reset, and alert-evidence isolation across pauses. A separate minimal patch for the downloaded e246574 revision is documented in [CALIBRATION_QUICK_FIX.md](CALIBRATION_QUICK_FIX.md).
 
 Run the hand-motion tests from the repository root on a machine with a C++11 compiler:
 

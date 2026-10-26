@@ -64,7 +64,7 @@ int main() {
       check(r.events == 1, "Moderate acceleration missed");
     });
     test("subthreshold movement and short gentle spikes do not trigger", [] {
-      SensorRunner r; r.hold(300); r.hold(500, HandMotionDetector::Gravity + 0.5f, 0.4f);
+      SensorRunner r; r.hold(300); r.hold(500, HandMotionDetector::Gravity + 0.5f, 0.2f);
       check(r.events == 0, "Subthreshold movement triggered");
       r.hold(300); r.sample(HandMotionDetector::Gravity, 0.7f); r.hold(300);
       check(r.events == 0, "One-sample gentle spike triggered");
@@ -92,6 +92,24 @@ int main() {
         r.hold(900);
       }
       check(r.events == 40 && r.timing.calibrated() && r.alerts == 0, "Gentle gesture cadence failed");
+    });
+    test("one-second slow turns with one-second holds count once per two-second cycle", [] {
+      SensorRunner r; r.hold(1000);
+      for (int i = 0; i < 40; ++i) {
+        r.hold(1000, HandMotionDetector::Gravity, 0.4f);
+        r.hold(1000);
+      }
+      check(r.events == 40 && r.timing.calibrated() && r.alerts == 0, "Slow hand cycles missed or double-counted");
+    });
+    test("sixteen slow hand gestures establish exactly fifteen valid intervals", [] {
+      SensorRunner r; r.hold(1000);
+      for (int i = 0; i < 15; ++i) {
+        r.hold(1000, HandMotionDetector::Gravity, 0.4f);
+        r.hold(1000);
+      }
+      check(r.events == 15 && r.timing.baselineIntervals() == 14 && !r.timing.calibrated(), "Calibration finished before fifteen intervals");
+      r.hold(1000, HandMotionDetector::Gravity, 0.4f); r.hold(1000);
+      check(r.events == 16 && r.timing.baselineIntervals() == 15 && r.timing.calibrated() && r.alerts == 0, "Fifteenth interval did not complete calibration");
     });
     test("acceleration-only movement can trigger an event", [] {
       SensorRunner r; r.hold(300); r.hold(100, 14.0f);

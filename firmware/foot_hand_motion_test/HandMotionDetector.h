@@ -9,9 +9,9 @@ class HandMotionDetector {
   static constexpr float Gravity = 9.80665f;
   // Sensitive bench settings; retune and validate for actual running.
   static constexpr float AccelHigh = 1.2f;  // |magnitude - gravity|, m/s^2
-  static constexpr float GyroHigh = 0.50f;  // angular-rate magnitude, rad/s
+  static constexpr float GyroHigh = 0.30f;  // angular-rate magnitude, rad/s
   static constexpr float AccelQuiet = 0.8f;
-  static constexpr float GyroQuiet = 0.30f;
+  static constexpr float GyroQuiet = 0.15f;
   static constexpr uint32_t QuietHoldMs = 120;
   static constexpr uint32_t ActiveHoldMs = 20;
   static constexpr uint32_t RefractoryMs = 350;

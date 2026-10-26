@@ -17,13 +17,13 @@ ECE 590 running-gait monitoring prototype: a shoe-mounted IMU and XIAO ESP32-C3 
 
 Follow the [two-window hand-motion guide](firmware/HAND_MOTION_TEST.md). Open `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` in the foot window and `firmware/wrist_hand_motion_test/wrist_hand_motion_test.ino` in the wrist window. Upload both to their actual boards. Keep all accompanying headers in their respective sketch folders.
 
-This test reads the real foot IMU and sends gesture events over BLE; it does not require a command to generate abnormal data. After `LINK_READY`, send `r` to the wrist, perform about 31 evenly spaced move-and-hold gestures to establish 30 timing intervals, then vary the gesture timing to test the alert. Use 115200 baud. It is a hand-motion bench test, not validated running-gait detection. Pauses and missing events now preserve calibration progress and the baseline; only valid intervals count. Use `r` to deliberately start over. If updating the older downloaded revision by hand, see the [copy/paste calibration fix](firmware/CALIBRATION_QUICK_FIX.md).
+This test reads the real foot IMU and sends gesture events over BLE; it does not require a command to generate abnormal data. After `LINK_READY`, send `r` to the wrist, perform about 16 evenly spaced move-and-hold gestures to establish 15 timing intervals (about one second turning plus one second holding still per gesture), then vary the gesture timing to test the alert. Use 115200 baud. It is a hand-motion bench test, not validated running-gait detection. Pauses and missing events now preserve calibration progress and the baseline; only valid intervals count. Use `r` to deliberately start over. If updating the older downloaded revision by hand, see the [copy/paste calibration fix](firmware/CALIBRATION_QUICK_FIX.md).
 
 ## Optional synthetic-input algorithm simulation
 
 Open `algorithm_demo/gait_stability_sim/gait_stability_sim.ino` in Arduino IDE. Keep `GaitStabilityDetector.h` in the same folder. Upload to the actual wrist board using the team's validated board/USB settings. No foot node, IMU, or motor is needed with the default settings.
 
-Open Serial Monitor at **115200 baud**, wait about **22.5 seconds** for `BASELINE_READY`, then send `u` for sustained irregular timing, `n` for recovery, or `s` for a single disturbance. See the [algorithm guide](algorithm_demo/README.md) for parameters, commands, validation, and optional motor output.
+Open Serial Monitor at **115200 baud**, wait about **11.25 seconds** for `BASELINE_READY`, then send `u` for sustained irregular timing, `n` for recovery, or `s` for a single disturbance. See the [algorithm guide](algorithm_demo/README.md) for parameters, commands, validation, and optional motor output.
 
 This is a separate sketch. Uploading it replaces the wrist's running BLE firmware. To restore the hardware test, upload `firmware/wrist_full_system_test/wrist_full_system_test.ino` again. Keep every sketch independent; never combine their `setup()` and `loop()` functions.
 

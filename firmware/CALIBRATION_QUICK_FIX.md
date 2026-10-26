@@ -1,4 +1,6 @@
-# Minimal copy/paste calibration fix for e246574
+# Archived copy/paste calibration fix for e246574
+
+The historical patch below uses the original 30-interval target. The current initial-test version uses 15 intervals. For an older hand-edited project, set `BaselineWindows = 3` in the wrist header and replace only `/30` display suffixes with `/15` in its `.ino`; the existing five-interval window then yields a 15-interval target. The current complete version derives its display target automatically.
 
 These five edits are for the exact downloaded `e246574` wrist sketch. They fix the reported calibration resets without changing foot firmware or manufacturing interval samples. Do not apply them on top of the current complete version, which already includes the fix plus enhanced status diagnostics and an explicit waiting state.
 
