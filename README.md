@@ -6,7 +6,7 @@ ECE 590 running-gait monitoring prototype: a shoe-mounted IMU and XIAO ESP32-C3 
 
 | Directory | Purpose | Current status |
 | --- | --- | --- |
-| `firmware/foot_hand_motion_test/` | Real foot IMU gesture events sent over BLE | Sensitive bench-test transmitter with trigger diagnostics; uses board-default I2C; C3 and Feather S3 compilation verified |
+| `firmware/foot_hand_motion_test/` | Real foot IMU gesture events sent over BLE | Original working gesture settings restored, with trigger diagnostics; uses board-default I2C; C3 and Feather S3 compilation verified |
 | `firmware/wrist_hand_motion_test/` | Real-event timing baseline, deviation detection, and haptics | Current bench-test receiver; Feather ESP32-S3 No PSRAM compilation verified |
 | `firmware/foot_full_ble_test/` | Foot IMU acquisition and BLE notification server | Original full hardware-test source preserved |
 | `firmware/wrist_full_system_test/` | BLE receiver, wrist IMU, and manual vibration test | Original full hardware-test source preserved; no automatic gait detector integrated |
@@ -17,7 +17,7 @@ ECE 590 running-gait monitoring prototype: a shoe-mounted IMU and XIAO ESP32-C3 
 
 Follow the [two-window hand-motion guide](firmware/HAND_MOTION_TEST.md). Open `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` in the foot window and `firmware/wrist_hand_motion_test/wrist_hand_motion_test.ino` in the wrist window. Upload both to their actual boards. Keep all accompanying headers in their respective sketch folders.
 
-This test reads the real foot IMU and sends gesture events over BLE; it does not require a command to generate abnormal data. After `LINK_READY`, send `r` to the wrist, perform about 16 evenly spaced move-and-hold gestures to establish 15 timing intervals (about one second turning plus one second holding still per gesture), then vary the gesture timing to test the alert. Use 115200 baud. It is a hand-motion bench test, not validated running-gait detection. Pauses and missing events now preserve calibration progress and the baseline; only valid intervals count. Use `r` to deliberately start over. If updating the older downloaded revision by hand, see the [copy/paste calibration fix](firmware/CALIBRATION_QUICK_FIX.md).
+This test reads the real foot IMU and sends gesture events over BLE; it does not require a command to generate abnormal data. After `LINK_READY`, send `r` to the wrist, perform about 16 evenly spaced move-and-hold gestures to establish 15 timing intervals, using the same gesture that triggered in the earlier working test, then vary the gesture timing to test the alert. Use 115200 baud. It is a hand-motion bench test, not validated running-gait detection. Pauses and missing events now preserve calibration progress and the baseline; only valid intervals count. Use `r` to deliberately start over. If updating the older downloaded revision by hand, see the [copy/paste calibration fix](firmware/CALIBRATION_QUICK_FIX.md).
 
 ## Optional synthetic-input algorithm simulation
 

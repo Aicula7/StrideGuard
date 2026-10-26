@@ -55,18 +55,26 @@ int main() {
       SensorRunner r; r.hold(300); r.gesture(1000);
       check(r.events == 1, "Incorrect gesture count");
     });
-    test("a gentle 0.7 rad/s hand rotation is detected", [] {
+    test("original threshold rejects subthreshold 0.7 rad/s rotation", [] {
       SensorRunner r; r.hold(300); r.hold(100, HandMotionDetector::Gravity, 0.7f);
-      check(r.events == 1, "Gentle rotation missed");
+      check(r.events == 0, "Original rotation threshold changed");
     });
-    test("a moderate 1.6 m/s2 acceleration deviation is detected", [] {
+    test("mild hand-held drift between movements still permits every rearm", [] {
+      SensorRunner r; r.hold(300);
+      for (int i = 0; i < 20; ++i) {
+        r.hold(100, HandMotionDetector::Gravity, 1.2f);
+        r.hold(900, HandMotionDetector::Gravity, 0.20f);
+      }
+      check(r.events == 20, "Held-hand drift prevented rearming and lost movements");
+    });
+    test("original threshold rejects subthreshold 1.6 m/s2 acceleration", [] {
       SensorRunner r; r.hold(300); r.hold(100, HandMotionDetector::Gravity + 1.6f);
-      check(r.events == 1, "Moderate acceleration missed");
+      check(r.events == 0, "Original acceleration threshold changed");
     });
     test("subthreshold movement and short gentle spikes do not trigger", [] {
       SensorRunner r; r.hold(300); r.hold(500, HandMotionDetector::Gravity + 0.5f, 0.2f);
       check(r.events == 0, "Subthreshold movement triggered");
-      r.hold(300); r.sample(HandMotionDetector::Gravity, 0.7f); r.hold(300);
+      r.hold(300); r.sample(HandMotionDetector::Gravity, 1.2f); r.hold(300);
       check(r.events == 0, "One-sample gentle spike triggered");
     });
     test("diagnostic phase distinguishes rearm, confirmation, cooldown, and ready", [] {
@@ -74,41 +82,41 @@ int main() {
       check(r.latest.phase == HandMotionDetector::Phase::NeedQuiet, "Initial quiet phase missing");
       r.hold(300);
       check(r.latest.phase == HandMotionDetector::Phase::Ready, "Ready phase missing");
-      r.sample(HandMotionDetector::Gravity, 0.7f);
+      r.sample(HandMotionDetector::Gravity, 1.2f);
       check(r.latest.phase == HandMotionDetector::Phase::Confirming, "Confirmation phase missing");
-      r.hold(20, HandMotionDetector::Gravity, 0.7f);
+      r.hold(20, HandMotionDetector::Gravity, 1.2f);
       check(r.latest.phase == HandMotionDetector::Phase::Event, "Event phase missing");
-      r.hold(30, HandMotionDetector::Gravity, 0.7f);
+      r.hold(30, HandMotionDetector::Gravity, 1.2f);
       check(r.latest.phase == HandMotionDetector::Phase::NeedQuiet, "Post-event rearm phase missing");
       r.hold(140);
       check(r.latest.phase == HandMotionDetector::Phase::Cooldown, "Cooldown phase missing");
       r.hold(300);
       check(r.latest.phase == HandMotionDetector::Phase::Ready, "Cooldown did not finish");
     });
-    test("repeated gentle gestures still produce exactly one event per cycle", [] {
+    test("original gestures still produce exactly one event per cycle", [] {
       SensorRunner r; r.hold(300);
       for (int i = 0; i < 40; ++i) {
-        r.hold(100, HandMotionDetector::Gravity, 0.7f);
+        r.hold(100, HandMotionDetector::Gravity, 1.2f);
         r.hold(900);
       }
-      check(r.events == 40 && r.timing.calibrated() && r.alerts == 0, "Gentle gesture cadence failed");
+      check(r.events == 40 && r.timing.calibrated() && r.alerts == 0, "Original gesture cadence failed");
     });
-    test("one-second slow turns with one-second holds count once per two-second cycle", [] {
+    test("subthreshold slow turns do not create fabricated movement events", [] {
       SensorRunner r; r.hold(1000);
       for (int i = 0; i < 40; ++i) {
         r.hold(1000, HandMotionDetector::Gravity, 0.4f);
         r.hold(1000);
       }
-      check(r.events == 40 && r.timing.calibrated() && r.alerts == 0, "Slow hand cycles missed or double-counted");
+      check(r.events == 0 && !r.timing.calibrated() && r.alerts == 0, "Subthreshold slow movement incorrectly counted");
     });
-    test("sixteen slow hand gestures establish exactly fifteen valid intervals", [] {
+    test("sixteen original gestures establish exactly fifteen valid intervals", [] {
       SensorRunner r; r.hold(1000);
       for (int i = 0; i < 15; ++i) {
-        r.hold(1000, HandMotionDetector::Gravity, 0.4f);
+        r.hold(1000, HandMotionDetector::Gravity, 1.2f);
         r.hold(1000);
       }
       check(r.events == 15 && r.timing.baselineIntervals() == 14 && !r.timing.calibrated(), "Calibration finished before fifteen intervals");
-      r.hold(1000, HandMotionDetector::Gravity, 0.4f); r.hold(1000);
+      r.hold(1000, HandMotionDetector::Gravity, 1.2f); r.hold(1000);
       check(r.events == 16 && r.timing.baselineIntervals() == 15 && r.timing.calibrated() && r.alerts == 0, "Fifteenth interval did not complete calibration");
     });
     test("acceleration-only movement can trigger an event", [] {
