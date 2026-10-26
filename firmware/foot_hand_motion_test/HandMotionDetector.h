@@ -7,18 +7,21 @@
 class HandMotionDetector {
  public:
   static constexpr float Gravity = 9.80665f;
-  static constexpr float AccelHigh = 2.5f;  // |magnitude - gravity|, m/s^2
-  static constexpr float GyroHigh = 1.0f;   // angular-rate magnitude, rad/s
+  // Sensitive bench settings; retune and validate for actual running.
+  static constexpr float AccelHigh = 1.2f;  // |magnitude - gravity|, m/s^2
+  static constexpr float GyroHigh = 0.50f;  // angular-rate magnitude, rad/s
   static constexpr float AccelQuiet = 0.8f;
   static constexpr float GyroQuiet = 0.30f;
   static constexpr uint32_t QuietHoldMs = 120;
   static constexpr uint32_t ActiveHoldMs = 20;
   static constexpr uint32_t RefractoryMs = 350;
   static constexpr uint32_t MaxSampleGapMs = 100;
+  enum class Phase { Invalid, NeedQuiet, Ready, Confirming, Cooldown, Event };
   struct Result {
     bool valid = false;
     bool event = false;
     bool armed = false;
+    Phase phase = Phase::Invalid;
     float accelerationDeviation = 0;
     float angularRateMagnitude = 0;
   };
@@ -80,7 +83,23 @@ class HandMotionDetector {
       }
     }
     out.armed = armed_;
+    if (out.event) out.phase = Phase::Event;
+    else if (!armed_) out.phase = Phase::NeedQuiet;
+    else if (hasEvent_ && timeMs - lastEventMs_ < RefractoryMs) out.phase = Phase::Cooldown;
+    else if (activeTracking_) out.phase = Phase::Confirming;
+    else out.phase = Phase::Ready;
     return out;
+  }
+
+  static const char* phaseName(Phase phase) {
+    switch (phase) {
+      case Phase::NeedQuiet: return "NEED_QUIET";
+      case Phase::Ready: return "READY";
+      case Phase::Confirming: return "CONFIRMING";
+      case Phase::Cooldown: return "COOLDOWN";
+      case Phase::Event: return "EVENT";
+      default: return "INVALID";
+    }
   }
 
  private:

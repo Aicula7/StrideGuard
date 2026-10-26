@@ -63,9 +63,20 @@ The foot computes two real quantities:
 - `dev_mps2 = acceleration magnitude - 9.80665`, in m/s^2. This is a simple magnitude-based motion proxy, not full gravity compensation or impact force.
 - `gyro_rps = angular-rate magnitude`, in rad/s.
 
-After a quiet hold of 120 ms (`|dev| < 0.8` and `gyro < 0.30`), the detector arms. Motion above `|dev| > 2.5` **or** `gyro > 1.0` for at least 20 ms creates one event. Another quiet hold and at least 350 ms since the previous event are required before another can trigger. This supports a deliberate move-and-hold bench gesture; it is not a validated foot-strike extractor.
+After a quiet hold of 120 ms (`|dev| < 0.8` and `gyro < 0.30`), the detector arms. The more sensitive bench settings require motion above `|dev| > 1.2` **or** `gyro > 0.50` for at least 20 ms to create one event. Another quiet hold and at least 350 ms since the previous event are required before another can trigger. This supports a deliberate move-and-hold bench gesture; it is not a validated foot-strike extractor.
 
-Check the foot `SENSOR` lines first if gestures are missed. `armed=0` during continuous movement means there has not been a sufficiently quiet hold. Very slow rotation can remain below the activation threshold. If one intended gesture generates multiple events, simplify it to one movement followed by a hold before tuning the timing algorithm. Threshold constants are in `HandMotionDetector.h`.
+For an initial movement, try turning the entire IMU-bearing foot module about 20-30 degrees over 0.3-0.5 seconds, then holding still for about 0.3 seconds. Angle alone is not the trigger: angular speed and acceleration matter. Each turn out or back is a separate intentional gesture; do not immediately return and expect both directions to count as a single action. Establish a baseline with roughly one action per second. Moving only the MCU while the separate IMU stays on the table will not provide the intended input. These values are a starting point for the user's bench test, not measurements validated on their actual movements.
+
+To update an existing foot sketch by hand, only replace these two constants in `HandMotionDetector.h` and upload the foot board again:
+
+```cpp
+static constexpr float AccelHigh = 1.2f;
+static constexpr float GyroHigh = 0.50f;
+```
+
+The quiet, debounce, and 350 ms refractory requirements remain unchanged. After changing extraction thresholds, send `r` once to the wrist and deliberately establish a new baseline with the new event definition.
+
+Check the foot `SENSOR` lines first if gestures are missed. `armed=0` during continuous movement means there has not been a sufficiently quiet hold. Very slow rotation can remain below the activation threshold. If one intended gesture generates multiple events, simplify it to one movement followed by a hold before tuning the timing algorithm. Threshold constants are in `HandMotionDetector.h`. The complete updated foot sketch also reports one-second `peak_dev_mps2` and `peak_gyro_rps`, so the periodic snapshot no longer hides brief movement peaks. `phase=READY` means it can accept a sufficiently large movement; `NEED_QUIET` means hold still before another gesture; `CONFIRMING` means the 20 ms high-duration check is in progress; `COOLDOWN` means the 350 ms minimum event spacing has not elapsed. Peaks alone do not establish that the required duration or rearm conditions were satisfied.
 
 ## Data integrity and stopping
 
@@ -82,7 +93,7 @@ Wrist commands are **`r`** (recalibrate), **`v`** (manual motor test), and **`?`
 
 ## Validation and remaining limits
 
-Both new sketches successfully compiled for the listed ESP32 targets. Fourteen additional portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, and nonfinite inputs. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The shared detector's 16 tests include the reported 2681 ms gap, segmented calibration, baseline retention, explicit reset, and alert-evidence isolation across pauses. A separate minimal patch for the downloaded e246574 revision is documented in [CALIBRATION_QUICK_FIX.md](CALIBRATION_QUICK_FIX.md).
+Both new sketches successfully compiled for the listed ESP32 targets. Nineteen portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, nonfinite inputs, gentle-motion sensitivity, subthreshold rejection, diagnostic phases, and repeated gentle gestures. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The shared detector's 16 tests include the reported 2681 ms gap, segmented calibration, baseline retention, explicit reset, and alert-evidence isolation across pauses. A separate minimal patch for the downloaded e246574 revision is documented in [CALIBRATION_QUICK_FIX.md](CALIBRATION_QUICK_FIX.md).
 
 Run the hand-motion tests from the repository root on a machine with a C++11 compiler:
 

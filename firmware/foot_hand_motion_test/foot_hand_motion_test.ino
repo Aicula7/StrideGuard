@@ -21,6 +21,8 @@ uint32_t lastSampleMs = 0;
 uint32_t lastHeartbeatMs = 0;
 uint32_t lastStatusMs = 0;
 HandMotionDetector::Result latest;
+float peakDeviation = 0;
+float peakAngularRate = 0;
 
 class HandServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override { connected.store(true); }
@@ -78,6 +80,8 @@ void setup() {
   advertising->addServiceUUID(HandTest::ServiceUuid);
   BLEDevice::startAdvertising();
   Serial.println("# FOOT_READY: advertising hand-test service. Hold still, then make separate move-and-hold gestures.");
+  Serial.printf("# HAND_TRIGGER accel_dev_gt=%.2f mps2 OR gyro_gt=%.2f rad/s; quiet hold=120 ms; high hold=20 ms.\n",
+      HandMotionDetector::AccelHigh, HandMotionDetector::GyroHigh);
 }
 
 void loop() {
@@ -92,6 +96,8 @@ void loop() {
     imu.getEvent(&acceleration, &angularRate, &temperature);
     latest = motion.update(now, acceleration.acceleration.x, acceleration.acceleration.y,
         acceleration.acceleration.z, angularRate.gyro.x, angularRate.gyro.y, angularRate.gyro.z);
+    peakDeviation = fmaxf(peakDeviation, fabsf(latest.accelerationDeviation));
+    peakAngularRate = fmaxf(peakAngularRate, latest.angularRateMagnitude);
     if (latest.event) {
       ++eventSequence;
       notifyPacket(HandTest::Gesture, now);
@@ -106,9 +112,12 @@ void loop() {
   }
   if (now - lastStatusMs >= 1000) {
     lastStatusMs = now;
-    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f armed=%d connected=%d events=%lu\n",
-        latest.accelerationDeviation, latest.angularRateMagnitude, latest.armed ? 1 : 0,
+    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f peak_dev_mps2=%.2f peak_gyro_rps=%.2f phase=%s armed=%d connected=%d events=%lu\n",
+        latest.accelerationDeviation, latest.angularRateMagnitude, peakDeviation, peakAngularRate,
+        HandMotionDetector::phaseName(latest.phase), latest.armed ? 1 : 0,
         connected.load() ? 1 : 0, static_cast<unsigned long>(eventSequence));
+    peakDeviation = 0;
+    peakAngularRate = 0;
   }
   delay(1);
 }

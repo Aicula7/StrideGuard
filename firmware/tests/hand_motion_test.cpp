@@ -55,6 +55,44 @@ int main() {
       SensorRunner r; r.hold(300); r.gesture(1000);
       check(r.events == 1, "Incorrect gesture count");
     });
+    test("a gentle 0.7 rad/s hand rotation is detected", [] {
+      SensorRunner r; r.hold(300); r.hold(100, HandMotionDetector::Gravity, 0.7f);
+      check(r.events == 1, "Gentle rotation missed");
+    });
+    test("a moderate 1.6 m/s2 acceleration deviation is detected", [] {
+      SensorRunner r; r.hold(300); r.hold(100, HandMotionDetector::Gravity + 1.6f);
+      check(r.events == 1, "Moderate acceleration missed");
+    });
+    test("subthreshold movement and short gentle spikes do not trigger", [] {
+      SensorRunner r; r.hold(300); r.hold(500, HandMotionDetector::Gravity + 0.5f, 0.4f);
+      check(r.events == 0, "Subthreshold movement triggered");
+      r.hold(300); r.sample(HandMotionDetector::Gravity, 0.7f); r.hold(300);
+      check(r.events == 0, "One-sample gentle spike triggered");
+    });
+    test("diagnostic phase distinguishes rearm, confirmation, cooldown, and ready", [] {
+      SensorRunner r; r.sample();
+      check(r.latest.phase == HandMotionDetector::Phase::NeedQuiet, "Initial quiet phase missing");
+      r.hold(300);
+      check(r.latest.phase == HandMotionDetector::Phase::Ready, "Ready phase missing");
+      r.sample(HandMotionDetector::Gravity, 0.7f);
+      check(r.latest.phase == HandMotionDetector::Phase::Confirming, "Confirmation phase missing");
+      r.hold(20, HandMotionDetector::Gravity, 0.7f);
+      check(r.latest.phase == HandMotionDetector::Phase::Event, "Event phase missing");
+      r.hold(30, HandMotionDetector::Gravity, 0.7f);
+      check(r.latest.phase == HandMotionDetector::Phase::NeedQuiet, "Post-event rearm phase missing");
+      r.hold(140);
+      check(r.latest.phase == HandMotionDetector::Phase::Cooldown, "Cooldown phase missing");
+      r.hold(300);
+      check(r.latest.phase == HandMotionDetector::Phase::Ready, "Cooldown did not finish");
+    });
+    test("repeated gentle gestures still produce exactly one event per cycle", [] {
+      SensorRunner r; r.hold(300);
+      for (int i = 0; i < 40; ++i) {
+        r.hold(100, HandMotionDetector::Gravity, 0.7f);
+        r.hold(900);
+      }
+      check(r.events == 40 && r.timing.calibrated() && r.alerts == 0, "Gentle gesture cadence failed");
+    });
     test("acceleration-only movement can trigger an event", [] {
       SensorRunner r; r.hold(300); r.hold(100, 14.0f);
       check(r.events == 1, "Acceleration trigger missing");
