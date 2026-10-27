@@ -17,7 +17,9 @@ std::atomic<bool> connected(false);
 std::atomic<bool> restartAdvertising(false);
 uint32_t bootSession = 0;
 uint32_t eventSequence = 0;
+uint32_t motionSampleSequence = 0;
 uint32_t lastSampleMs = 0;
+uint32_t lastMotionSampleMs = 0;
 uint32_t lastHeartbeatMs = 0;
 uint32_t lastStatusMs = 0;
 HandMotionDetector::Result latest;
@@ -40,7 +42,7 @@ void notifyPacket(uint8_t type, uint32_t timestampMs) {
   packet.version = HandTest::Version;
   packet.type = type;
   packet.bootSession = bootSession;
-  packet.sequence = eventSequence;
+  packet.sequence = type == HandTest::MotionSample ? motionSampleSequence : eventSequence;
   packet.timestampMs = timestampMs;
   const float accel = fmaxf(-32768.0f, fminf(32767.0f, latest.accelerationDeviation * 100.0f));
   const float gyro = fmaxf(0.0f, fminf(65535.0f, latest.angularRateMagnitude * 100.0f));
@@ -53,7 +55,7 @@ void notifyPacket(uint8_t type, uint32_t timestampMs) {
 void setup() {
   Serial.begin(115200);
   delay(1500);
-  Serial.println("# HAND_TEST_BUILD: guided-baseline-v1");
+  Serial.println("# HAND_TEST_BUILD: vigorous-motion-v2 protocol=2");
   Serial.println("# MANUAL_HAND_TEST: real foot IMU input, not validated gait detection.");
   // Use the selected board's SDA/SCL pins, not XIAO-only D4/D5 aliases.
   // For custom wiring, replace this with Wire.begin(sdaGpio, sclGpio).
@@ -87,7 +89,8 @@ void setup() {
       static_cast<unsigned long>(HandMotionDetector::QuietHoldMs),
       static_cast<unsigned long>(HandMotionDetector::ActiveHoldMs));
   Serial.println("# HAND_GUIDE: try one 30-45 degree tilt in about 0.4 s, then hold still about 1 s. Alternate direction each time.");
-  Serial.println("# Continuous waving counts once until a quiet hold. SENSOR values changing does not mean a new event.");
+  Serial.println("# Calibration gestures need quiet rearming. After BASELINE_READY, continuous motion needs no gesture or quiet hold.");
+  Serial.println("# MOTION_STREAM: sending real magnitude samples about every 20 ms, independently of gesture events.");
 }
 
 void loop() {
@@ -99,9 +102,13 @@ void loop() {
   if (now - lastSampleMs >= 10) {
     lastSampleMs = now;
     sensors_event_t acceleration, angularRate, temperature;
-    imu.getEvent(&acceleration, &angularRate, &temperature);
-    latest = motion.update(now, acceleration.acceleration.x, acceleration.acceleration.y,
-        acceleration.acceleration.z, angularRate.gyro.x, angularRate.gyro.y, angularRate.gyro.z);
+    if (imu.getEvent(&acceleration, &angularRate, &temperature)) {
+      latest = motion.update(now, acceleration.acceleration.x, acceleration.acceleration.y,
+          acceleration.acceleration.z, angularRate.gyro.x, angularRate.gyro.y, angularRate.gyro.z);
+    } else {
+      motion.reset();
+      latest = HandMotionDetector::Result();
+    }
     peakDeviation = fmaxf(peakDeviation, fabsf(latest.accelerationDeviation));
     peakAngularRate = fmaxf(peakAngularRate, latest.angularRateMagnitude);
     if (latest.event) {
@@ -110,12 +117,17 @@ void loop() {
       Serial.printf("# HAND_EVENT seq=%lu foot_ms=%lu dev_mps2=%.2f gyro_rps=%.2f connected=%d\n",
           static_cast<unsigned long>(eventSequence), static_cast<unsigned long>(now),
           latest.accelerationDeviation, latest.angularRateMagnitude, connected.load() ? 1 : 0);
-      Serial.println("# HOLD_STILL: event counted. Stop moving the IMU until MOVE_NOW; do not immediately swing back.");
+      Serial.println("# HOLD_STILL: calibration event counted. After baseline, ignore gesture prompts and move continuously.");
     }
     if (!latest.armed) movePromptShown = false;
     if (latest.phase == HandMotionDetector::Phase::Ready && !movePromptShown) {
       movePromptShown = true;
-      Serial.println("# MOVE_NOW: ready for ONE tilt, then hold still. Aim for event spacing about 1.5 s during calibration.");
+      Serial.println("# MOVE_NOW: calibration gesture ready. After baseline, ignore this prompt and move continuously.");
+    }
+    if (latest.valid && now - lastMotionSampleMs >= 20) {
+      lastMotionSampleMs = now;
+      ++motionSampleSequence;
+      notifyPacket(HandTest::MotionSample, now);
     }
   }
   if (latest.valid && now - lastHeartbeatMs >= 500) {
@@ -124,10 +136,11 @@ void loop() {
   }
   if (now - lastStatusMs >= 1000) {
     lastStatusMs = now;
-    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f peak_dev_mps2=%.2f peak_gyro_rps=%.2f phase=%s armed=%d connected=%d events=%lu quiet_ms=%lu/%lu hint=%s\n",
+    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f peak_dev_mps2=%.2f peak_gyro_rps=%.2f gesture_phase=%s armed=%d connected=%d events=%lu sample_seq=%lu quiet_ms=%lu/%lu calibration_hint=%s\n",
         latest.accelerationDeviation, latest.angularRateMagnitude, peakDeviation, peakAngularRate,
         HandMotionDetector::phaseName(latest.phase), latest.armed ? 1 : 0,
         connected.load() ? 1 : 0, static_cast<unsigned long>(eventSequence),
+        static_cast<unsigned long>(motionSampleSequence),
         static_cast<unsigned long>(latest.quietHoldMs),
         static_cast<unsigned long>(HandMotionDetector::QuietHoldMs),
         !latest.valid ? "CHECK_IMU" : !latest.armed ? "HOLD_STILL" :

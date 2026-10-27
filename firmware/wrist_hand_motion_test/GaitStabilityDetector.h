@@ -205,3 +205,168 @@ class GaitStabilityDetector {
   bool hasAlert_ = false;
   uint32_t lastAlertMs_ = 0;
 };
+
+// Independent post-calibration demo; the timing baseline above is unchanged.
+// Fixed-threshold bench demonstration, not a gait or fall diagnosis.
+// Input is continuous real IMU magnitudes, never gesture timestamps.
+class VigorousMotionDetector {
+ public:
+  // Tune these engineering starting values from actual MOTION_WINDOW logs.
+  static constexpr float AccelEnter = 3.0f;  // RMS of |a|-g, m/s^2
+  static constexpr float GyroEnter = 3.0f;   // RMS angular-rate magnitude, rad/s
+  static constexpr float AccelExit = 1.5f;
+  static constexpr float GyroExit = 1.5f;
+  static constexpr uint32_t WindowMs = 500;
+  static constexpr uint32_t MaxSampleGapMs = 80;
+  static constexpr uint32_t NoDataTimeoutMs = 500;
+  static constexpr size_t MinimumSamples = 20;  // Nominally 25 samples at 50 Hz.
+  static constexpr uint8_t EnterWindows = 4;
+  static constexpr uint8_t ExitWindows = 4;
+
+  enum class State { WaitingForData, Collecting, Stable, Suspect, Unstable };
+  struct Result {
+    bool accepted = false;
+    bool started = false;
+    bool windowComplete = false;
+    bool streamReset = false;
+    bool alert = false;
+    bool high = false;
+    bool low = false;
+    size_t samples = 0;
+    uint32_t durationMs = 0;
+    float accelRms = 0;
+    float gyroRms = 0;
+    uint8_t highWindows = 0;
+    uint8_t lowWindows = 0;
+    uint32_t missedSamples = 0;
+    const char* resetReason = "NONE";
+    State state = State::WaitingForData;
+  };
+
+  void reset() {
+    hasSample_ = false;
+    hasDecision_ = false;
+    unstable_ = false;
+    high_ = 0;
+    low_ = 0;
+    count_ = 0;
+    accelSquared_ = 0;
+    gyroSquared_ = 0;
+  }
+
+  State state() const {
+    if (!hasSample_) return State::WaitingForData;
+    if (!hasDecision_) return State::Collecting;
+    if (unstable_) return State::Unstable;
+    return high_ ? State::Suspect : State::Stable;
+  }
+  size_t windowSamples() const { return count_; }
+  uint32_t windowElapsedMs() const { return hasSample_ ? lastTimeMs_ - windowStartMs_ : 0; }
+
+  Result observe(uint32_t timestampMs, uint32_t sequence,
+                 float accelerationDeviation, float angularRateMagnitude) {
+    Result out;
+    out.state = state();
+    if (!isfinite(accelerationDeviation) || !isfinite(angularRateMagnitude) || angularRateMagnitude < 0) {
+      reset();
+      out.streamReset = true;
+      out.resetReason = "INVALID_SAMPLE";
+      out.state = state();
+      return out;
+    }
+    if (hasSample_) {
+      const uint32_t sequenceDelta = sequence - lastSequence_;
+      // Ignore repeated/out-of-order packets; they do not refresh evidence.
+      if (sequenceDelta == 0 || sequenceDelta >= 0x80000000UL) return out;
+      out.missedSamples = sequenceDelta - 1;
+      const uint32_t timeDelta = timestampMs - lastTimeMs_;
+      // Small losses are allowed only with sufficient window coverage. A burst
+      // or a long timestamp gap breaks the sustained-motion evidence.
+      if (sequenceDelta > 4 || timeDelta == 0 || timeDelta > MaxSampleGapMs) {
+        reset();
+        out.streamReset = true;
+        out.resetReason = sequenceDelta != 1 ? "SAMPLE_SEQUENCE_GAP" : "SAMPLE_TIME_GAP";
+      }
+    }
+    if (!hasSample_) {
+      startWindow(timestampMs);
+      out.started = true;
+    } else if (timestampMs - windowStartMs_ >= WindowMs) {
+      out.samples = count_;
+      out.durationMs = timestampMs - windowStartMs_;
+      if (count_ < MinimumSamples || out.durationMs > WindowMs + MaxSampleGapMs) {
+        reset();
+        out.streamReset = true;
+        out.resetReason = "INSUFFICIENT_WINDOW_COVERAGE";
+        out.started = true;
+      } else {
+        out.windowComplete = true;
+        out.accelRms = sqrtf(static_cast<float>(accelSquared_ / count_));
+        out.gyroRms = sqrtf(static_cast<float>(gyroSquared_ / count_));
+        out.high = out.accelRms > AccelEnter || out.gyroRms > GyroEnter;
+        out.low = out.accelRms < AccelExit && out.gyroRms < GyroExit;
+        hasDecision_ = true;
+        if (!unstable_) {
+          high_ = out.high ? high_ + 1 : 0;
+          low_ = 0;
+          if (high_ >= EnterWindows) {
+            unstable_ = true;
+            out.alert = true;
+          }
+        } else {
+          low_ = out.low ? low_ + 1 : 0;
+          if (low_ >= ExitWindows) {
+            unstable_ = false;
+            high_ = 0;
+          }
+        }
+      }
+      // The boundary sample belongs only to the next, non-overlapping window.
+      startWindow(timestampMs);
+    }
+    hasSample_ = true;
+    lastTimeMs_ = timestampMs;
+    lastSequence_ = sequence;
+    ++count_;
+    accelSquared_ += static_cast<double>(accelerationDeviation) * accelerationDeviation;
+    gyroSquared_ += static_cast<double>(angularRateMagnitude) * angularRateMagnitude;
+    out.accepted = true;
+    out.highWindows = high_;
+    out.lowWindows = low_;
+    out.state = state();
+    return out;
+  }
+
+  static const char* stateName(State value) {
+    switch (value) {
+      case State::Collecting: return "COLLECTING_WINDOW";
+      case State::Stable: return "STABLE";
+      case State::Suspect: return "SUSPECT";
+      case State::Unstable: return "UNSTABLE";
+      default: return "WAITING_FOR_DATA";
+    }
+  }
+  const char* dataStateName() const {
+    if (!hasSample_) return "NO_DATA";
+    return hasDecision_ ? "READY" : "COLLECTING_WINDOW";
+  }
+
+ private:
+  void startWindow(uint32_t timestampMs) {
+    windowStartMs_ = timestampMs;
+    count_ = 0;
+    accelSquared_ = 0;
+    gyroSquared_ = 0;
+  }
+  bool hasSample_ = false;
+  bool hasDecision_ = false;
+  bool unstable_ = false;
+  uint8_t high_ = 0;
+  uint8_t low_ = 0;
+  size_t count_ = 0;
+  double accelSquared_ = 0;
+  double gyroSquared_ = 0;
+  uint32_t windowStartMs_ = 0;
+  uint32_t lastTimeMs_ = 0;
+  uint32_t lastSequence_ = 0;
+};

@@ -6,8 +6,8 @@ ECE 590 running-gait monitoring prototype: a shoe-mounted IMU and XIAO ESP32-C3 
 
 | Directory | Purpose | Current status |
 | --- | --- | --- |
-| `firmware/foot_hand_motion_test/` | Real foot IMU gesture events sent over BLE | Original working gesture settings restored, with trigger diagnostics; uses board-default I2C; C3 and Feather S3 compilation verified |
-| `firmware/wrist_hand_motion_test/` | Real-event timing baseline, deviation detection, and haptics | Continuous automatic alarm until wrist `s`; `v` tests a short click; Feather ESP32-S3 No PSRAM compilation verified |
+| `firmware/foot_hand_motion_test/` | Calibration gestures plus independent real 50 Hz motion samples over BLE | Protocol v2; original gesture settings retained; XIAO ESP32-C3 compilation verified |
+| `firmware/wrist_hand_motion_test/` | Original 30-interval calibration, then fixed-threshold vigorous-motion detection | 500 ms RMS windows; four high windows latch an alarm until `s`; Feather S3 No PSRAM compilation verified |
 | `firmware/foot_full_ble_test/` | Foot IMU acquisition and BLE notification server | Original full hardware-test source preserved |
 | `firmware/wrist_full_system_test/` | BLE receiver, wrist IMU, and manual vibration test | Original full hardware-test source preserved; no automatic gait detector integrated |
 | `algorithm_demo/gait_stability_sim/` | Independent baseline-relative stride-timing simulation | Software detector tested on generated events; no real IMU input |
@@ -19,7 +19,9 @@ Use the [quick test checklist](firmware/QUICK_TEST.md) for the complete procedur
 
 Follow the [two-window hand-motion guide](firmware/HAND_MOTION_TEST.md). Open `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` in the foot window and `firmware/wrist_hand_motion_test/wrist_hand_motion_test.ino` in the wrist window. Upload both to their actual boards. Keep all accompanying headers in their respective sketch folders.
 
-This test reads the real foot IMU and sends gesture events over BLE; it does not require a command to generate abnormal data. First verify five separate tilt-and-hold actions give five foot events. The guided build prints `MOVE_NOW` and `HOLD_STILL` on the foot; continuously changing sensor values do not count as separate actions. After `LINK_READY`, send `r` to the wrist once, then perform 31 tilt-and-hold cycles about 1.5 seconds apart to establish 30 timing intervals. The wrist prints each accepted interval and `BASELINE_READY` on completion. See the guide for a repeatable exercise and troubleshooting. Use 115200 baud. It is a hand-motion bench test, not validated running-gait detection. Pauses and missing events preserve calibration progress and the baseline; only valid intervals count. Use `r` to deliberately start over. If updating the older downloaded revision by hand, see the [copy/paste calibration fix](firmware/CALIBRATION_QUICK_FIX.md).
+This test reads the real Foot IMU. Upload **both matching protocol-v2 sketches** with their headers. Calibration is unchanged: send `r` to Wrist, perform about 31 evenly spaced tilt-and-hold gestures to collect 30 valid intervals, and wait for `BASELINE_READY`. Pauses retain calibration progress.
+
+After calibration, **continuous motion samples replace gesture timing as the alarm input**. Hold still or move gently for STABLE; move the module continuously and vigorously for about 3-4 seconds to test the alarm. No metronome, quiet hold, or new gesture events are needed in this stage. Each 500 ms window computes acceleration-deviation and gyro RMS. Four consecutive windows above the fixed demo limits enter UNSTABLE and latch continuous vibration; `s` stops vibration and keeps the baseline. The timing baseline is retained but does not set the fixed intensity thresholds. These are adjustable bench-demo limits, not validated gait criteria. See the [copy/paste update map](firmware/ARDUINO_UPDATE.md) and [full technical guide](firmware/HAND_MOTION_TEST.md).
 
 ## Optional synthetic-input algorithm simulation
 

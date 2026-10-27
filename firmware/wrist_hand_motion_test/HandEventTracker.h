@@ -13,6 +13,7 @@ class HandEventTracker {
   void reset() { seen_ = false; }
   Decision accept(const HandTest::Packet& packet) {
     Decision out;
+    if (packet.type == HandTest::MotionSample) return out;
     if (!seen_ || packet.bootSession != session_) {
       seen_ = true;
       session_ = packet.bootSession;

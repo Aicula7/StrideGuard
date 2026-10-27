@@ -9,13 +9,14 @@
 #include "HandEventTracker.h"
 #include "GaitStabilityDetector.h"
 
-// All detector input comes from the real FOOT IMU gesture events.
-// This sketch does not generate synthetic events or use wrist motion as gait.
+// Calibration retains real FOOT gesture timing. After calibration, independent
+// continuous FOOT IMU samples drive a fixed-threshold vigorous-motion demo.
 Adafruit_DRV2605 drv;
 bool hapticReady = false;
 bool alarmLatched = false;
 constexpr uint8_t AlarmRtpLevel = 0x40;  // Bench-test ERM drive level.
-GaitStabilityDetector timing;
+GaitStabilityDetector timing;  // Original 30-interval calibration, unchanged.
+VigorousMotionDetector intensity;
 HandEventTracker tracker;
 BLEClient* client = nullptr;
 BLEScan* scanner = nullptr;
@@ -40,6 +41,26 @@ uint32_t pauseCount = 0;
 const char* lastPauseReason = "NONE";
 bool haveFootSession = false;
 uint32_t lastFootSession = 0;
+uint32_t lastMotionSampleAt = 0;
+uint32_t motionSamplesReceived = 0;
+uint32_t motionDataGaps = 0;
+uint32_t motionSamplesMissing = 0;
+bool haveMotionSamples = false;
+
+const char* experimentState() {
+  return timing.calibrated() ? VigorousMotionDetector::stateName(intensity.state()) : "CALIBRATING";
+}
+
+const char* motionDataState() {
+  if (!haveMotionSamples) return "NO_DATA";
+  return timing.calibrated() ? intensity.dataStateName() : "STREAMING";
+}
+
+void resetMotionStream(const char* reason) {
+  intensity.reset();
+  haveMotionSamples = false;
+  Serial.printf("# MOTION_DATA_PAUSED reason=%s. Baseline and alarm latch retained.\n", reason);
+}
 
 void printCalibrationProgress() {
   Serial.printf("# CALIBRATION intervals=%u/%u baseline_ready=%d\n",
@@ -49,6 +70,11 @@ void printCalibrationProgress() {
 
 void resetTiming(const char* reason) {
   timing.reset();
+  intensity.reset();
+  haveMotionSamples = false;
+  motionSamplesReceived = 0;
+  motionDataGaps = 0;
+  motionSamplesMissing = 0;
   eventSeen = false;
   eventsReceived = 0;
   pauseCount = 0;
@@ -75,6 +101,7 @@ void pauseTiming(const char* reason, bool clockRestarted) {
 
 void pauseReception(const char* reason) {
   pauseTiming(reason, false);
+  resetMotionStream(reason);
   if (rxQueue) xQueueReset(rxQueue);
 }
 
@@ -171,26 +198,70 @@ bool connectFoot() {
   return ready;
 }
 
+void processMotionSample(const HandTest::Packet& packet, uint32_t arrivedAt) {
+  ++motionSamplesReceived;
+  if (!timing.calibrated()) {
+    // Receive the stream during calibration without changing its baseline.
+    lastMotionSampleAt = arrivedAt;
+    haveMotionSamples = true;
+    return;
+  }
+  const auto result = intensity.observe(packet.timestampMs, packet.sequence,
+      packet.accelerationDeviationCenti / 100.0f, packet.angularRateCenti / 100.0f);
+  motionSamplesMissing += result.missedSamples;
+  if (result.accepted) {
+    lastMotionSampleAt = arrivedAt;
+    haveMotionSamples = true;
+  }
+  if (result.streamReset) {
+    ++motionDataGaps;
+    Serial.printf("# MOTION_DATA_GAP reason=%s. Pending evidence cleared; baseline retained.\n", result.resetReason);
+  }
+  if (result.started) {
+    Serial.println("# MOTION_DATA data_state=COLLECTING_WINDOW window_ms=0/500. No gesture or quiet hold is required.");
+  }
+  if (result.windowComplete) {
+    Serial.printf("# MOTION_WINDOW duration_ms=%lu samples=%u accel_rms_mps2=%.2f gyro_rms_rps=%.2f accel_enter=%.2f gyro_enter=%.2f high=%d high_windows=%u/%u low_windows=%u/%u state=%s\n",
+        static_cast<unsigned long>(result.durationMs), static_cast<unsigned>(result.samples),
+        result.accelRms, result.gyroRms, VigorousMotionDetector::AccelEnter, VigorousMotionDetector::GyroEnter,
+        result.high ? 1 : 0, static_cast<unsigned>(result.highWindows),
+        static_cast<unsigned>(VigorousMotionDetector::EnterWindows), static_cast<unsigned>(result.lowWindows),
+        static_cast<unsigned>(VigorousMotionDetector::ExitWindows), VigorousMotionDetector::stateName(result.state));
+  }
+  if (result.alert) {
+    Serial.println("# VIGOROUS_MOTION_ALERT: four sustained high-intensity windows; bench demo, not a gait diagnosis.");
+    startAlarm();
+  }
+}
+
 void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
   lastPacketAt = arrivedAt;
   const bool footRestarted = haveFootSession && packet.bootSession != lastFootSession;
   haveFootSession = true;
   lastFootSession = packet.bootSession;
-  const auto decision = tracker.accept(packet);
-  if (decision.resetTiming) {
-    if (footRestarted) pauseTiming("FOOT_RESTART", true);
-    else if (decision.missed) pauseTiming("MISSING_EVENTS", false);
-    if (decision.missed) Serial.printf("# Missed events: %lu\n", static_cast<unsigned long>(decision.missed));
+  if (footRestarted) {
+    pauseTiming("FOOT_RESTART", true);
+    resetMotionStream("FOOT_RESTART");
   }
-  if (!decision.event) return;  // Heartbeats are never treated as motion events.
+  if (packet.type == HandTest::MotionSample) {
+    processMotionSample(packet, arrivedAt);
+    return;  // Its sequence is independent of gesture event sequencing.
+  }
+  const auto decision = tracker.accept(packet);
+  if (decision.missed) {
+    Serial.printf("# Missed gesture events: %lu\n", static_cast<unsigned long>(decision.missed));
+    if (!timing.calibrated()) pauseTiming("MISSING_EVENTS", false);
+  }
+  if (!decision.event) return;
   eventSeen = true;
   lastEventAt = arrivedAt;
   ++eventsReceived;
-  const auto result = timing.observeStride(packet.timestampMs);
   Serial.printf("# REAL_HAND_EVENT seq=%lu foot_ms=%lu dev_mps2=%.2f gyro_rps=%.2f state=%s\n",
       static_cast<unsigned long>(packet.sequence), static_cast<unsigned long>(packet.timestampMs),
-      packet.accelerationDeviationCenti / 100.0f, packet.angularRateCenti / 100.0f,
-      GaitStabilityDetector::stateName(result.state));
+      packet.accelerationDeviationCenti / 100.0f, packet.angularRateCenti / 100.0f, experimentState());
+  if (timing.calibrated()) return;  // Event spacing no longer drives stability.
+
+  const auto result = timing.observeStride(packet.timestampMs);
   if (result.gapReset) {
     ++pauseCount;
     lastPauseReason = "LONG_INTERVAL";
@@ -199,48 +270,55 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
         static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
   }
   if (result.referenceOnly) {
-    Serial.printf("# REFERENCE_EVENT: start timestamp only, no interval yet. Next FOOT event must be %lu-%lu ms later.\n",
+    Serial.printf("# REFERENCE_EVENT: calibration reference only. Next FOOT event must be %lu-%lu ms later.\n",
         static_cast<unsigned long>(GaitStabilityDetector::MinStrideMs),
         static_cast<unsigned long>(GaitStabilityDetector::MaxStrideMs));
   }
-  if (result.accepted) {
-    Serial.printf("# INTERVAL_ACCEPTED ms=%lu\n", static_cast<unsigned long>(result.intervalMs));
-  }
+  if (result.accepted) Serial.printf("# INTERVAL_ACCEPTED ms=%lu\n", static_cast<unsigned long>(result.intervalMs));
   if (!result.accepted && !result.referenceOnly && !result.gapReset) {
     Serial.printf("# INTERVAL_SKIPPED too_short_ms=%lu\n", static_cast<unsigned long>(result.intervalMs));
   }
-  if (!timing.calibrated() || result.justCalibrated) printCalibrationProgress();
+  printCalibrationProgress();
   if (result.windowComplete) {
-    Serial.printf("# WINDOW mean_ms=%.1f cv_pct=%.2f baseline_cv_pct=%.2f enter_cv_pct=%.2f state=%s\n",
-        result.meanMs, result.cvPercent, result.baselineCv, result.enterCv,
-        GaitStabilityDetector::stateName(result.state));
+    Serial.printf("# BASELINE_TIMING_WINDOW mean_ms=%.1f cv_pct=%.2f baseline_cv_pct=%.2f timing_enter_cv_pct=%.2f\n",
+        result.meanMs, result.cvPercent, result.baselineCv, result.enterCv);
   }
   if (result.justCalibrated) {
-    Serial.println("# BASELINE_READY: now vary your HAND gesture intervals while keeping separate gestures.");
-    if (result.baselineCv > 10.0f) {
-      Serial.println("# BASELINE_NOISY: consider r and recalibrate with a steadier rhythm.");
-    }
+    intensity.reset();
+    Serial.println("# BASELINE_READY: 30 timing intervals saved. Switching to CONTINUOUS VIGOROUS MOTION detection.");
+    Serial.println("# Fixed intensity thresholds are independent of timing CV. Move gently for STABLE; shake continuously for the alarm.");
+    Serial.println("# Gesture events and quiet holds are no longer required. Four high 500 ms windows trigger the alarm; s stops it.");
+    if (result.baselineCv > 10.0f) Serial.println("# BASELINE_NOISY: timing CV is high; it does not change the fixed motion thresholds.");
   }
-  if (result.alert) {
-    Serial.println("# HAND_TIMING_ALERT: sustained irregular real foot-module gestures; not a validated gait diagnosis.");
-    startAlarm();
-  }
-  if (result.cooldownSuppressed) Serial.println("# ALERT_SUPPRESSED: cooldown active.");
 }
 
 void printHelp() {
-  Serial.println("# HAND_TEST_BUILD: latched-alarm-30-v1");
-  Serial.println("# MANUAL_HAND_TEST: wrist receives real FOOT IMU gesture events, no synthetic input.");
-  Serial.println("# s: stop latched vibration; r: stop and recalibrate; v: one short motor test; ?: help");
-  Serial.println("# Automatic alerts latch until s or r, even if timing recovers or FOOT disconnects.");
-  Serial.println("# s keeps the baseline and does not retrigger the same ongoing episode.");
-  Serial.println("# Pauses/lost data keep valid calibration samples and baseline; only r or wrist restart clears them.");
-  Serial.println("# A skipped interval never counts toward calibration. Wrist IMU is not used for this bench test.");
-  Serial.printf("# Calibration target: %u valid intervals. First event is a time reference.\n",
-      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
-  Serial.println("# First verify 5 separate tilts give 5 FOOT events. Hold still between tilts; do not continuously wave.");
-  Serial.printf("# Then send r ONCE and repeat a tilt-and-hold cycle about every 1.5 s for %u events.\n",
+  Serial.println("# HAND_TEST_BUILD: vigorous-motion-v2 protocol=2; upload BOTH matching sketches.");
+  Serial.println("# r: stop and restart original 30-interval calibration; s: stop alarm, keep baseline; v: short motor test; ?: help");
+  Serial.println("# After baseline: real 50 Hz motion samples, 500 ms RMS windows, four consecutive high windows to alert.");
+  Serial.printf("# FIXED_DEMO_THRESHOLDS accel_enter=%.2f mps2 gyro_enter=%.2f rad/s accel_exit=%.2f gyro_exit=%.2f\n",
+      VigorousMotionDetector::AccelEnter, VigorousMotionDetector::GyroEnter,
+      VigorousMotionDetector::AccelExit, VigorousMotionDetector::GyroExit);
+  Serial.println("# Thresholds are adjustable engineering starting values, not learned from the timing baseline.");
+  Serial.println("# Alarm latches until s or r. Recovery/data loss do not silence it. s does not force STABLE.");
+  Serial.printf("# Calibration: %u valid intervals, about %u uninterrupted gesture events. Pauses keep progress.\n",
+      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget),
       static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget + 1));
+}
+
+void printStatus(uint32_t now) {
+  if (now - lastStatusAt >= 1000) {
+    lastStatusAt = now;
+    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s baseline=%u/%u data_state=%s window_ms=%lu/%lu samples=%u event_activity=%s events_rx=%lu motion_samples_rx=%lu motion_gaps=%lu samples_missing=%lu alarm_latched=%d\n",
+        linkUp.load() ? 1 : 0, static_cast<unsigned long>(now - lastPacketAt), experimentState(),
+        static_cast<unsigned>(timing.baselineIntervals()),
+        static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget), motionDataState(),
+        static_cast<unsigned long>(intensity.windowElapsedMs()),
+        static_cast<unsigned long>(VigorousMotionDetector::WindowMs), static_cast<unsigned>(intensity.windowSamples()),
+        eventSeen && now - lastEventAt <= 2800 ? "RECENT_EVENT" : "NO_RECENT_EVENTS",
+        static_cast<unsigned long>(eventsReceived), static_cast<unsigned long>(motionSamplesReceived),
+        static_cast<unsigned long>(motionDataGaps), static_cast<unsigned long>(motionSamplesMissing), alarmLatched ? 1 : 0);
+  }
 }
 
 void setup() {
@@ -293,6 +371,7 @@ void loop() {
     // Keep the stop command responsive: do not enter blocking BLE discovery
     // or connection attempts while an unacknowledged alarm is vibrating.
     if (alarmLatched) {
+      printStatus(now);
       delay(1);
       return;
     }
@@ -300,6 +379,7 @@ void loop() {
       connectFoot();
       nextScanAt = millis() + 3000;
     }
+    printStatus(millis());
     delay(1);
     return;
   }
@@ -314,20 +394,15 @@ void loop() {
   }
   now = millis();
   if (now - lastPacketAt > 2500) {
-    pauseReception("NO_FOOT_DATA");
+    pauseReception("NO_COMPATIBLE_FOOT_DATA_CHECK_BOTH_V2");
     subscribed = false;
     client->disconnect();
-  } else if (eventSeen && now - lastEventAt > 2800) {
+  } else if (!timing.calibrated() && eventSeen && now - lastEventAt > 2800) {
     pauseTiming("NO_MOTION", false);
   }
-  if (now - lastStatusAt >= 2000) {
-    lastStatusAt = now;
-    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s baseline=%u/%u activity=%s events_rx=%lu pauses=%lu last_pause=%s alarm_latched=%d\n",
-        linkUp.load() ? 1 : 0, static_cast<unsigned long>(now - lastPacketAt),
-        GaitStabilityDetector::stateName(timing.state()), static_cast<unsigned>(timing.baselineIntervals()),
-        static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget),
-        eventSeen ? "ACTIVE" : "IDLE", static_cast<unsigned long>(eventsReceived),
-        static_cast<unsigned long>(pauseCount), lastPauseReason, alarmLatched ? 1 : 0);
+  if (haveMotionSamples && now - lastMotionSampleAt > VigorousMotionDetector::NoDataTimeoutMs) {
+    resetMotionStream("NO_CONTINUOUS_SAMPLES");
   }
+  printStatus(now);
   delay(1);
 }

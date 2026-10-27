@@ -1,6 +1,7 @@
-# StrideGuard: Quick Bench Test
+# StrideGuard: Vigorous-Motion Demo
 
-Real Foot IMU gestures -> BLE -> timing detection -> Wrist vibration. This is a bench test, not validated walking/running gait detection.
+Real Foot IMU -> BLE -> sustained motion intensity -> Wrist vibration.
+This is a fixed-threshold bench demo, not a gait/fall diagnosis.
 
 ## Setup
 
@@ -9,76 +10,73 @@ Real Foot IMU gestures -> BLE -> timing detection -> Wrist vibration. This is a 
 | Foot | `foot_hand_motion_test/foot_hand_motion_test.ino` | XIAO_ESP32C3 / COM3 |
 | Wrist | `wrist_hand_motion_test/wrist_hand_motion_test.ino` | Adafruit Feather ESP32-S3 No PSRAM / COM4 |
 
-Upload matching sketches with their headers. Keep both powered. Open both Serial Monitors at **115200 baud**. Confirm Foot `connected=1` and Wrist `link=1`.
+Upload **both matching v2 sketches and headers**. Open both Serial Monitors at **115200 baud**. Expect `vigorous-motion-v2 protocol=2`, Foot `connected=1`, and Wrist `link=1`.
 
-## 1. Reset
+## 1. Reset and calibrate as before
 
-In **Wrist**, enter **`r`** and press Enter once. Expect `0/30`; any continuous alarm stops. No Foot command is needed.
+In **Wrist**, enter **`r`** once. Expect `0/30`. Optional: `v` tests one short vibration.
 
-Optional: enter `v` in Wrist to check one short vibration. It does not build the baseline.
+Use separate tilt-and-hold gestures: tilt once, stop until `MOVE_NOW`, tilt back, stop again. One direction is one event. Aim for an even 1.5-second rhythm (40 BPM), as before.
 
-## 2. Make separate gestures
+- First event is a reference: `0/30`.
+- The next 30 valid intervals complete `30/30`; normally about 31 gestures.
+- Pauses retain progress; calibration intervals remain 350-2500 ms.
+- Expect `BASELINE_READY` and `Switching to CONTINUOUS VIGOROUS MOTION detection`.
 
-Support your forearm on the desk and hold the IMU-bearing Foot module still until `MOVE_NOW` or `READY armed=1`.
+The original timing baseline is retained. Its CV is **not** used to set the new fixed motion thresholds. `BASELINE_NOISY` reports timing quality only and does not block the motion demo.
 
-```text
-Tilt to one side -> HOLD STILL -> tilt back -> HOLD STILL -> repeat
-```
+**Do not send `r` again unless you want to erase and repeat calibration.**
 
-Each direction is one gesture. Start with a 30-45 degree tilt taking about 0.4 seconds; these are suggestions, not programmed angle requirements. After each tilt, stop until the next `MOVE_NOW`.
+## 2. Show stable motion
 
-During calibration, check that each gesture gives one Foot `HAND_EVENT` and one Wrist `REAL_HAND_EVENT`. Continuous waving does not count as separate gestures.
+Hold the Foot module still or move it gently for 2-3 seconds. Continuous samples are sent even when `events` stays fixed.
 
-## 3. Build baseline
+Expect `data_state=COLLECTING_WINDOW` initially, then half-second `MOTION_WINDOW` lines with `state=STABLE`. Stillness with valid samples is stable, not missing data.
 
-Use a **40 BPM metronome**: start one tilt on each beat, about **1.5 seconds apart**. Hold still between tilts.
+## 3. Show vigorous motion
 
-- First event: `0/30` (time reference only).
-- Second event: `1/30`.
-- With uninterrupted valid events, event 31 completes `30/30` and prints `BASELINE_READY`.
-- First-to-last event span: about **45 seconds**.
+Hold the IMU-bearing module securely and move it back and forth continuously for about 3-4 seconds, without pulling its wires. **No quiet holds, metronome, or event timing are needed after baseline.**
 
-Record `baseline_cv_pct` and `enter_cv_pct`. If `BASELINE_NOISY` appears, use `r` and repeat more evenly.
+Each non-overlapping 500 ms window calculates:
 
-**Do not send `r` during the remaining tests.**
+- `accel_rms_mps2`: RMS of acceleration magnitude minus gravity.
+- `gyro_rms_rps`: RMS of angular-rate magnitude.
 
-## 4. Regular timing
-
-Continue even 1.5-second gestures for about 15 gestures. Expect complete `WINDOW` lines to report `STABLE`, with no automatic alarm.
-
-## 5. Irregular timing
-
-Keep the same gesture shape. Alternate **gesture-start intervals**:
+A high window has acceleration RMS **> 3.0 m/s^2 OR** gyro RMS **> 3.0 rad/s**. Four consecutive high windows (about 2 seconds of qualifying data, allowing a transition window) produce:
 
 ```text
-1.0 s, 2.2 s, 1.0 s, 2.2 s, ...
+state=SUSPECT high_windows=1/4
+state=SUSPECT high_windows=2/4
+state=SUSPECT high_windows=3/4
+state=UNSTABLE high_windows=4/4
+VIGOROUS_MOTION_ALERT
+ALARM_LATCHED
+HAPTIC_COMMAND_SENT mode=CONTINUOUS
 ```
 
-Each interval includes the tilt and hold. Do about 16 gestures continuously. Detected intervals must stay within **350-2500 ms**.
+Confirm physical motor vibration. A short shake may make `SUSPECT` without an alarm. Merely changing gesture timing no longer triggers this detector.
 
-Two consecutive five-interval windows with `cv_pct > enter_cv_pct` trigger the alarm. A correctly detected 1.0/2.2-second pattern gives about 34-40% CV; compare this with the learned threshold.
+## 4. Stop and recover
 
-Expect `HAND_TIMING_ALERT`, `ALARM_LATCHED`, and `HAPTIC_COMMAND_SENT mode=CONTINUOUS`. Confirm continuous physical vibration.
+Enter **`s` in Wrist**: vibration stops and baseline remains `30/30`. This acknowledges the alarm; it does not force `STABLE`.
 
-## 6. Stop and recover
+Return to stillness/gentle motion. Four consecutive windows with **both** RMS values below **1.5** recover to `STABLE`. An unacknowledged motor alarm continues even after recovery. A fresh episode after recovery can trigger again.
 
-Enter **`s` in Wrist**. Expect `ALARM_STOPPED`; confirm the motor stops and baseline remains `30/30`.
+## Read the diagnostics
 
-Resume regular 1.5-second gestures for about 15 gestures. Two low-CV windows recover to `STABLE`; a transition window may require extra gestures. A long pause does not demonstrate recovery.
-
-Vibration stays latched even if timing recovers; acknowledge with `s`. It does not immediately retrigger the same ongoing episode.
-
-## Commands and troubleshooting
-
-| Item | Meaning |
+| Output | Meaning |
 | --- | --- |
-| `s` in Wrist | Stop alarm; retain baseline |
-| `r` in Wrist | Stop alarm; clear and rebuild baseline |
-| `v` in Wrist | One short motor test |
-| `NEED_QUIET armed=0` | Hold still until `MOVE_NOW` |
-| Values change but `events` stays fixed | No new independent gesture was detected |
-| Progress stalls | Check Foot events, Wrist reception, and valid intervals |
-| `TIMING_PAUSED` / `WAITING_FOR_MOTION` | Baseline retained; next event is a new reference |
-| `HAPTIC_UNAVAILABLE` | No driver command sent; check hardware and `v` |
+| `state=CALIBRATING` | Original timing baseline is incomplete |
+| `data_state=NO_DATA` / `state=WAITING_FOR_DATA` | No current usable motion data; not a stable judgment |
+| `data_state=COLLECTING_WINDOW` | Samples are arriving; first full window is not ready |
+| `data_state=READY` | A completed window has produced a judgment |
+| `event_activity=NO_RECENT_EVENTS` | No recent tilt event; normal during continuous shaking |
+| `MOTION_DATA_GAP` | Incomplete coverage/burst loss; pending evidence restarted |
+| `motion_samples_rx` | Received continuous sample count, independent of `events_rx` |
+| `s` / `r` / `v` | Stop alarm / stop and recalibrate / one short motor test |
 
-Pauses retain progress. Wrist reset/power loss/upload clears its RAM baseline. A uniformly slower rhythm can still be regular: this algorithm measures timing variability.
+## Tune only after reading actual windows
+
+Starting thresholds are engineering demo values, not validated or learned intensity limits. In the **Wrist** `GaitStabilityDetector.h`, find `class VigorousMotionDetector` and adjust `AccelEnter` / `GyroEnter`. Use quiet/gentle and vigorous `MOTION_WINDOW` measurements to choose a separation. A normal fast rotation may also be high intensity.
+
+Missing motion samples, disconnection, or queue overflow reset pending intensity evidence and retain baseline/alarm. A long sampling gap cannot count toward a sustained alarm. Wrist reset/power loss/upload clears the RAM baseline.
