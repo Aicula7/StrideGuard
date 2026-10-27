@@ -22,6 +22,7 @@ class HandMotionDetector {
     bool valid = false;
     bool event = false;
     bool armed = false;
+    uint32_t quietHoldMs = 0;  // Diagnostic only; never changes event extraction.
     Phase phase = Phase::Invalid;
     float accelerationDeviation = 0;
     float angularRateMagnitude = 0;
@@ -84,6 +85,10 @@ class HandMotionDetector {
       }
     }
     out.armed = armed_;
+    if (quietTracking_) {
+      const uint32_t heldMs = timeMs - quietSinceMs_;
+      out.quietHoldMs = heldMs < QuietHoldMs ? heldMs : QuietHoldMs;
+    }
     if (out.event) out.phase = Phase::Event;
     else if (!armed_) out.phase = Phase::NeedQuiet;
     else if (hasEvent_ && timeMs - lastEventMs_ < RefractoryMs) out.phase = Phase::Cooldown;

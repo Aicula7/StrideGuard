@@ -131,6 +131,43 @@ int main() {
       SensorRunner r; r.hold(300); r.hold(3000, 9.8f, 1.5f);
       check(r.events == 1, "Continuous active motion retriggered");
     });
+    test("varying large motion with brief quiet crossings still requires a full quiet hold", [] {
+      SensorRunner r; r.hold(300);
+      for (int i = 0; i < 16; ++i) {
+        r.hold(400, HandMotionDetector::Gravity + 3.0f, 4.0f);
+        r.hold(60, HandMotionDetector::Gravity, 0.04f);
+        r.hold(400, HandMotionDetector::Gravity - 2.0f, -2.0f);
+      }
+      check(r.events == 1 && !r.latest.armed && r.timing.baselineIntervals() == 0,
+          "Changing sensor values were mistaken for separate gestures");
+      r.hold(500);
+      check(r.latest.armed && r.latest.quietHoldMs == HandMotionDetector::QuietHoldMs,
+          "A sustained quiet hold did not rearm");
+      r.gesture(1500);
+      check(r.events == 2 && r.timing.baselineIntervals() == 0,
+          "A long gap incorrectly became a calibration interval");
+    });
+    test("quiet progress requires both acceleration and rotation to stay below their limits", [] {
+      SensorRunner r; r.hold(100);
+      check(!r.latest.armed && r.latest.quietHoldMs == 90, "Quiet progress was not reported");
+      r.sample(HandMotionDetector::Gravity, 0.4f);
+      check(!r.latest.armed && r.latest.quietHoldMs == 0, "Rotation did not interrupt quiet hold");
+      r.hold(100);
+      r.sample(HandMotionDetector::Gravity + 1.0f);
+      check(!r.latest.armed && r.latest.quietHoldMs == 0, "Acceleration did not interrupt quiet hold");
+      r.hold(140);
+      check(r.latest.armed && r.latest.quietHoldMs == 120, "Full quiet hold did not finish");
+    });
+    test("sixteen alternating tilt-and-hold cycles at 1.5 seconds complete calibration", [] {
+      SensorRunner r; r.hold(1000);
+      for (int i = 0; i < 16; ++i) {
+        r.hold(400, HandMotionDetector::Gravity, i % 2 ? -1.8f : 1.8f);
+        r.hold(1100, HandMotionDetector::Gravity, 0.04f);
+        check(r.events == i + 1, "A guided cycle did not produce exactly one gesture");
+        check(r.timing.baselineIntervals() == static_cast<size_t>(i), "Incorrect interval progress");
+      }
+      check(r.timing.calibrated() && r.alerts == 0, "Guided baseline failed");
+    });
     test("a sampling gap requires another quiet hold", [] {
       SensorRunner r; r.hold(300); r.now += 500; r.hold(100, 9.8f, 1.5f);
       check(r.events == 0, "Sampling gap retained armed state");

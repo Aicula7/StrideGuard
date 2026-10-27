@@ -6,8 +6,8 @@ Use this version when the foot module can only be moved by hand. It validates th
 
 | Window | Open this sketch | Upload to |
 | --- | --- | --- |
-| Left / foot | `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` | Actual foot board: proposal uses XIAO ESP32-C3; Feather ESP32-S3 compilation is also supported |
-| Right / wrist | `firmware/wrist_hand_motion_test/wrist_hand_motion_test.ino` | Actual Adafruit ESP32-S3 Feather variant |
+| Foot window | `firmware/foot_hand_motion_test/foot_hand_motion_test.ino` | XIAO ESP32-C3, shown on COM3 in the team's setup |
+| Wrist window | `firmware/wrist_hand_motion_test/wrist_hand_motion_test.ino` | Adafruit Feather ESP32-S3 No PSRAM, shown on COM4 in the team's setup |
 
 Download and fully extract the repository ZIP first. In each Arduino IDE window, close the old Serial Monitor, then use **File > Open** for the corresponding new `.ino`. The IDE may open another window; upload only from the new hand-test windows. Keep every `.h` beside its matching `.ino`. Do not copy all headers or both sketches into one folder.
 
@@ -40,6 +40,46 @@ Verified compilation configuration:
 4. Hold the foot module still for at least half a second. Then perform one quick, moderate tilt or short movement, followed by a still hold. Do not pull on its USB cable or continuously shake it.
 5. Confirm **one intended movement gives one `HAND_EVENT`** on the foot and one `REAL_HAND_EVENT` on the wrist. These are bench gestures, not detected running foot strikes.
 
+## Why changing sensor values can still leave the baseline at 0/15
+
+The supplied screenshot shows `connected=1` on the foot and `link=1` on the wrist. The first two real events occurred at foot timestamps `33001` and `49479` ms, separated by **16478 ms**. Between them the foot repeatedly reported `phase=NEED_QUIET armed=0`, despite large motion peaks. The wrist received both events but could not calculate a valid interval between them. Its pause handling correctly kept calibration at 0/15.
+
+There are three separate quantities:
+
+| Output | What it counts | What to do |
+| --- | --- | --- |
+| `SENSOR` numbers | Live acceleration and rotation, including samples from the same movement | Do not count these lines as gestures |
+| Foot `HAND_EVENT` / `events` | One detected gesture after quiet rearming | Verify five deliberate tilts give five increments first |
+| Wrist `CALIBRATION intervals` | Valid time gaps between received gestures | Keep event spacing within 350-2500 ms; the first event is only a reference |
+
+The `guided-baseline-v1` build adds immediate `MOVE_NOW` and `HOLD_STILL` prompts on the foot, `quiet_ms=.../120` in its status, and `INTERVAL_ACCEPTED ms=...` on the wrist. It retains the original extraction thresholds and calibration rules. It does not manufacture an event every second during continuous waving.
+
+## A repeatable baseline exercise
+
+1. Keep both modules powered with their correct sketches running. Confirm foot `connected=1` and wrist `link=1`.
+2. Rest your hand or forearm on the desk, supporting the IMU-bearing module. Hold it still for about one second. Look for foot `MOVE_NOW` or `phase=READY armed=1`. Do not grip bare contacts or strain the wiring.
+3. Tilt the module once by roughly **30-45 degrees in about 0.4 seconds**, then stop in that new position for about **one second**. These are starting suggestions, not measured angle/duration checks. The measured angular rate must actually cross 1.0 rad/s for 20 ms, or acceleration deviation must cross 2.5 m/s^2 for 20 ms.
+4. Tilt back on the next cycle and stop again. Each direction is its own action: **tilt, hold; tilt back, hold**. Do not wave continuously or immediately return after the first tilt. The quiet hold has a minimum of 120 ms; using about one second makes it easier to perform reliably.
+5. Try five cycles first. Foot `events` should increase by five and wrist should receive all five. There is no reason to change sensitivity if these match. If foot stays at `HOLD_STILL`, stop moving until `MOVE_NOW`; larger movements cannot rearm it. If it stays `READY` without counting your tilt, check motion peaks and use a more distinct tilt.
+6. Once the action is reliable, send **`r` once to the wrist only**. Then perform the same tilt-and-hold cycle at about **1.5-second onset-to-onset spacing**. A 40 BPM metronome gives one tilt per beat. Do not read or copy logs between every cycle; keep the pattern going for approximately 24 seconds.
+7. The first received event leaves `0/15`, the second gives `1/15`, the third `2/15`, and the sixteenth gives `15/15` followed by `BASELINE_READY`. The count refers to intervals, not events. A pause requires a new reference event but keeps previously accepted intervals. Do not send `r` repeatedly.
+
+Expected wrist output after `r`, with approximately 1.5-second event spacing:
+
+```text
+# REFERENCE_EVENT: start timestamp only, no interval yet. Next FOOT event must be 350-2500 ms later.
+# CALIBRATION intervals=0/15 baseline_ready=0
+# INTERVAL_ACCEPTED ms=1500
+# CALIBRATION intervals=1/15 baseline_ready=0
+# INTERVAL_ACCEPTED ms=1500
+# CALIBRATION intervals=2/15 baseline_ready=0
+...
+# CALIBRATION intervals=15/15 baseline_ready=1
+# BASELINE_READY: now vary your HAND gesture intervals while keeping separate gestures.
+```
+
+After calibration, try alternating 1.2-second and 2.2-second event spacing for at least 10-15 further intervals, keeping the same distinct tilt and quiet hold. Two high-CV five-interval windows are required to alert, so a single delayed gesture is insufficient. A consistently slower rhythm can still be regular; it is timing variability that this prototype measures. The motor test command `v` checks the actuator separately and does not build a baseline.
+
 ## Baseline, disturbance, and recovery
 
 Send **`r` to the wrist** to clear timing history. Use the same distinct move-and-hold gesture that produced events in the earlier successful hardware test. Keep the timing reasonably even; the user's earlier accepted intervals were often around 1.2-1.5 seconds. A metronome may help, but gesture recognition does not require a fixed turn duration. Each gesture should include a still hold before the next movement.
@@ -67,7 +107,7 @@ After a quiet hold of 120 ms (`|dev| < 0.8` and `gyro < 0.30`), the detector arm
 
 The foot extractor has been restored to the first-working settings from commit `f629040`, while retaining I2C compatibility and diagnostics. The wrist still keeps its pause-retention fix and 15-interval target. Do not combine this change with another timing/threshold experiment before verifying the restored event count.
 
-There is no fixed angle or 0.3-second deadline. Turn the IMU-bearing module with the same motion that previously triggered reliably, hold it briefly, then repeat. The old user logs show accepted gyroscope magnitudes around 1.0-1.3 rad/s. A sufficiently slow, gentle rotation may remain below the restored activation threshold; this is expected. Every move out or back is a separate gesture. Moving only the MCU while a separately wired IMU stays still will not provide the intended input.
+There is no enforced angle or 0.3-second deadline. The suggested tilt-and-hold exercise above is a practical way to cross the measured thresholds and allow rearming. The old user logs show accepted gyroscope magnitudes around 1.0-1.3 rad/s. A sufficiently slow, gentle rotation may remain below the restored activation threshold; this is expected. Every move out or back is a separate gesture. Moving only the MCU while a separately wired IMU stays still will not provide the intended input.
 
 To restore an existing foot sketch by hand, replace the four corresponding constants in `HandMotionDetector.h` with:
 
@@ -101,7 +141,7 @@ Wrist commands are **`r`** (recalibrate), **`v`** (manual motor test), and **`?`
 
 ## Validation and remaining limits
 
-Both new sketches successfully compiled for the listed ESP32 targets. Twenty-two portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, nonfinite inputs, subthreshold rejection under the original profile, diagnostic phases, original gesture counting, slow-motion rejection, held-hand rearming drift, and exact completion after 15 intervals. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The shared detector's 16 tests include the reported 2681 ms gap, segmented calibration, baseline retention, explicit reset, and alert-evidence isolation across pauses. A separate minimal patch for the downloaded e246574 revision is documented in [CALIBRATION_QUICK_FIX.md](CALIBRATION_QUICK_FIX.md).
+Both hand-test sketches have been compiled for the primary targets above. Twenty-five portable C++ tests cover stationary noise, gesture extraction, spike rejection, rearming, a regular/irregular sensor-waveform pipeline, heartbeat handling, missing events, restarts, packet validation, nonfinite inputs, subthreshold rejection under the original profile, diagnostic phases, original gesture counting, slow-motion rejection, held-hand rearming drift, and exact completion after 15 intervals. New fixtures reproduce varying large motion without a full quiet hold, verify the quiet-progress diagnostic, and complete a 15-interval baseline with sixteen alternating 1.5-second tilt-and-hold cycles. Those waveform fixtures are synthetic test inputs, not recorded human measurements. The shared detector's 16 tests include the reported 2681 ms gap, segmented calibration, baseline retention, explicit reset, and alert-evidence isolation across pauses. A separate minimal patch for the downloaded e246574 revision is documented in [CALIBRATION_QUICK_FIX.md](CALIBRATION_QUICK_FIX.md).
 
 Run the hand-motion tests from the repository root on a machine with a C++11 compiler:
 

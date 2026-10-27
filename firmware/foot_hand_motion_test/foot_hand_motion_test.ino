@@ -23,6 +23,7 @@ uint32_t lastStatusMs = 0;
 HandMotionDetector::Result latest;
 float peakDeviation = 0;
 float peakAngularRate = 0;
+bool movePromptShown = false;
 
 class HandServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override { connected.store(true); }
@@ -52,6 +53,7 @@ void notifyPacket(uint8_t type, uint32_t timestampMs) {
 void setup() {
   Serial.begin(115200);
   delay(1500);
+  Serial.println("# HAND_TEST_BUILD: guided-baseline-v1");
   Serial.println("# MANUAL_HAND_TEST: real foot IMU input, not validated gait detection.");
   // Use the selected board's SDA/SCL pins, not XIAO-only D4/D5 aliases.
   // For custom wiring, replace this with Wire.begin(sdaGpio, sclGpio).
@@ -79,9 +81,13 @@ void setup() {
   BLEAdvertising* advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(HandTest::ServiceUuid);
   BLEDevice::startAdvertising();
-  Serial.println("# FOOT_READY: advertising hand-test service. Hold still, then make separate move-and-hold gestures.");
-  Serial.printf("# HAND_TRIGGER accel_dev_gt=%.2f mps2 OR gyro_gt=%.2f rad/s; quiet hold=120 ms; high hold=20 ms.\n",
-      HandMotionDetector::AccelHigh, HandMotionDetector::GyroHigh);
+  Serial.println("# FOOT_READY: advertising hand-test service. Hold still until MOVE_NOW, then tilt once and stop.");
+  Serial.printf("# HAND_TRIGGER accel_dev_gt=%.2f mps2 OR gyro_gt=%.2f rad/s; quiet hold=%lu ms; high hold=%lu ms.\n",
+      HandMotionDetector::AccelHigh, HandMotionDetector::GyroHigh,
+      static_cast<unsigned long>(HandMotionDetector::QuietHoldMs),
+      static_cast<unsigned long>(HandMotionDetector::ActiveHoldMs));
+  Serial.println("# HAND_GUIDE: try one 30-45 degree tilt in about 0.4 s, then hold still about 1 s. Alternate direction each time.");
+  Serial.println("# Continuous waving counts once until a quiet hold. SENSOR values changing does not mean a new event.");
 }
 
 void loop() {
@@ -104,6 +110,12 @@ void loop() {
       Serial.printf("# HAND_EVENT seq=%lu foot_ms=%lu dev_mps2=%.2f gyro_rps=%.2f connected=%d\n",
           static_cast<unsigned long>(eventSequence), static_cast<unsigned long>(now),
           latest.accelerationDeviation, latest.angularRateMagnitude, connected.load() ? 1 : 0);
+      Serial.println("# HOLD_STILL: event counted. Stop moving the IMU until MOVE_NOW; do not immediately swing back.");
+    }
+    if (!latest.armed) movePromptShown = false;
+    if (latest.phase == HandMotionDetector::Phase::Ready && !movePromptShown) {
+      movePromptShown = true;
+      Serial.println("# MOVE_NOW: ready for ONE tilt, then hold still. Aim for event spacing about 1.5 s during calibration.");
     }
   }
   if (latest.valid && now - lastHeartbeatMs >= 500) {
@@ -112,10 +124,14 @@ void loop() {
   }
   if (now - lastStatusMs >= 1000) {
     lastStatusMs = now;
-    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f peak_dev_mps2=%.2f peak_gyro_rps=%.2f phase=%s armed=%d connected=%d events=%lu\n",
+    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f peak_dev_mps2=%.2f peak_gyro_rps=%.2f phase=%s armed=%d connected=%d events=%lu quiet_ms=%lu/%lu hint=%s\n",
         latest.accelerationDeviation, latest.angularRateMagnitude, peakDeviation, peakAngularRate,
         HandMotionDetector::phaseName(latest.phase), latest.armed ? 1 : 0,
-        connected.load() ? 1 : 0, static_cast<unsigned long>(eventSequence));
+        connected.load() ? 1 : 0, static_cast<unsigned long>(eventSequence),
+        static_cast<unsigned long>(latest.quietHoldMs),
+        static_cast<unsigned long>(HandMotionDetector::QuietHoldMs),
+        !latest.valid ? "CHECK_IMU" : !latest.armed ? "HOLD_STILL" :
+        latest.phase == HandMotionDetector::Phase::Cooldown ? "WAIT_COOLDOWN" : "MOVE_ONCE");
     peakDeviation = 0;
     peakAngularRate = 0;
   }

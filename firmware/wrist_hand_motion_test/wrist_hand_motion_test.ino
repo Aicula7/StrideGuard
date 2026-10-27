@@ -134,7 +134,7 @@ bool connectFoot() {
   if (ready) {
     subscribed = true;
     lastPacketAt = millis();
-    Serial.println("# LINK_READY: real foot events only. Move foot regularly about once per second.");
+    Serial.println("# LINK_READY: real foot events only. Tilt once, then hold still; repeat about every 1.5 s.");
   }
   return ready;
 }
@@ -166,7 +166,14 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
         static_cast<unsigned long>(result.intervalMs), static_cast<unsigned>(timing.baselineIntervals()),
         static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
   }
-  if (result.referenceOnly) Serial.println("# REFERENCE_EVENT: next valid event provides an interval; baseline retained.");
+  if (result.referenceOnly) {
+    Serial.printf("# REFERENCE_EVENT: start timestamp only, no interval yet. Next FOOT event must be %lu-%lu ms later.\n",
+        static_cast<unsigned long>(GaitStabilityDetector::MinStrideMs),
+        static_cast<unsigned long>(GaitStabilityDetector::MaxStrideMs));
+  }
+  if (result.accepted) {
+    Serial.printf("# INTERVAL_ACCEPTED ms=%lu\n", static_cast<unsigned long>(result.intervalMs));
+  }
   if (!result.accepted && !result.referenceOnly && !result.gapReset) {
     Serial.printf("# INTERVAL_SKIPPED too_short_ms=%lu\n", static_cast<unsigned long>(result.intervalMs));
   }
@@ -190,12 +197,15 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
 }
 
 void printHelp() {
+  Serial.println("# HAND_TEST_BUILD: guided-baseline-v1");
   Serial.println("# MANUAL_HAND_TEST: wrist receives real FOOT IMU gesture events, no synthetic input.");
   Serial.println("# r: restart timing calibration; v: manual motor test; ?: help");
   Serial.println("# Pauses/lost data keep valid calibration samples and baseline; only r or wrist restart clears them.");
   Serial.println("# A skipped interval never counts toward calibration. Wrist IMU is not used for this bench test.");
   Serial.printf("# Calibration target: %u valid intervals. First event is a time reference.\n",
       static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
+  Serial.println("# First verify 5 separate tilts give 5 FOOT events. Hold still between tilts; do not continuously wave.");
+  Serial.println("# Then send r ONCE and repeat a tilt-and-hold cycle about every 1.5 s for 16 events.");
 }
 
 void setup() {
