@@ -229,7 +229,7 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
 }
 
 void printHelp() {
-  Serial.println("# HAND_TEST_BUILD: latched-alarm-v1");
+  Serial.println("# HAND_TEST_BUILD: latched-alarm-30-v1");
   Serial.println("# MANUAL_HAND_TEST: wrist receives real FOOT IMU gesture events, no synthetic input.");
   Serial.println("# s: stop latched vibration; r: stop and recalibrate; v: one short motor test; ?: help");
   Serial.println("# Automatic alerts latch until s or r, even if timing recovers or FOOT disconnects.");
@@ -239,7 +239,8 @@ void printHelp() {
   Serial.printf("# Calibration target: %u valid intervals. First event is a time reference.\n",
       static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
   Serial.println("# First verify 5 separate tilts give 5 FOOT events. Hold still between tilts; do not continuously wave.");
-  Serial.println("# Then send r ONCE and repeat a tilt-and-hold cycle about every 1.5 s for 16 events.");
+  Serial.printf("# Then send r ONCE and repeat a tilt-and-hold cycle about every 1.5 s for %u events.\n",
+      static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget + 1));
 }
 
 void setup() {

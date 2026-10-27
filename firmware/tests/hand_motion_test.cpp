@@ -109,15 +109,15 @@ int main() {
       }
       check(r.events == 0 && !r.timing.calibrated() && r.alerts == 0, "Subthreshold slow movement incorrectly counted");
     });
-    test("sixteen original gestures establish exactly fifteen valid intervals", [] {
+    test("thirty-one original gestures establish exactly thirty valid intervals", [] {
       SensorRunner r; r.hold(1000);
-      for (int i = 0; i < 15; ++i) {
+      for (int i = 0; i < 30; ++i) {
         r.hold(1000, HandMotionDetector::Gravity, 1.2f);
         r.hold(1000);
       }
-      check(r.events == 15 && r.timing.baselineIntervals() == 14 && !r.timing.calibrated(), "Calibration finished before fifteen intervals");
+      check(r.events == 30 && r.timing.baselineIntervals() == 29 && !r.timing.calibrated(), "Calibration finished before thirty intervals");
       r.hold(1000, HandMotionDetector::Gravity, 1.2f); r.hold(1000);
-      check(r.events == 16 && r.timing.baselineIntervals() == 15 && r.timing.calibrated() && r.alerts == 0, "Fifteenth interval did not complete calibration");
+      check(r.events == 31 && r.timing.baselineIntervals() == 30 && r.timing.calibrated() && r.alerts == 0, "Thirtieth interval did not complete calibration");
     });
     test("acceleration-only movement can trigger an event", [] {
       SensorRunner r; r.hold(300); r.hold(100, 14.0f);
@@ -158,9 +158,9 @@ int main() {
       r.hold(140);
       check(r.latest.armed && r.latest.quietHoldMs == 120, "Full quiet hold did not finish");
     });
-    test("sixteen alternating tilt-and-hold cycles at 1.5 seconds complete calibration", [] {
+    test("thirty-one alternating tilt-and-hold cycles at 1.5 seconds complete calibration", [] {
       SensorRunner r; r.hold(1000);
-      for (int i = 0; i < 16; ++i) {
+      for (int i = 0; i < 31; ++i) {
         r.hold(400, HandMotionDetector::Gravity, i % 2 ? -1.8f : 1.8f);
         r.hold(1100, HandMotionDetector::Gravity, 0.04f);
         check(r.events == i + 1, "A guided cycle did not produce exactly one gesture");

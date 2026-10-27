@@ -16,7 +16,7 @@ Open `gait_stability_sim/gait_stability_sim.ino` in Arduino IDE. The header is a
 
 Select the actual wrist board and USB port, then verify/upload. For the team's Adafruit ESP32-S3 Feather, use the exact board variant and USB settings already validated by the team. Uploading this sketch replaces the running wrist firmware; the original source remains in `firmware/wrist_full_system_test/` and can be uploaded again to restore the BLE hardware test.
 
-The default sketch needs only the Arduino ESP32 board package. It does not initialize either IMU, BLE, or the motor. Open Serial Monitor at **115200 baud**, reset the board if needed, and wait about **11.25 seconds** for `BASELINE_READY`.
+The default sketch needs only the Arduino ESP32 board package. It does not initialize either IMU, BLE, or the motor. Open Serial Monitor at **115200 baud**, reset the board if needed, and wait about **22.5 seconds** for `BASELINE_READY`.
 
 ## Manual tests
 
@@ -41,7 +41,7 @@ Output is CSV with `#` comment lines. `NA` means no complete window is available
 1. Accept one timestamp for each successive strike of the **same foot**. Calculate interval using unsigned millisecond subtraction.
 2. Ignore duplicate/short intervals below 350 ms. An interval over 2500 ms is excluded as a gap. Calibration progress and the learned baseline are retained; monitoring evidence is cleared and the next interval uses a fresh reference. These bounds are configurable prototype assumptions.
 3. Use non-overlapping windows of five intervals. Calculate population standard deviation divided by mean, multiplied by 100: `CV = SD / mean * 100`.
-4. Calibrate on three normal windows (15 intervals). Baseline CV is the mean of those three window CV values. It remains fixed until explicit reset or device restart. Valid calibration intervals may accumulate across interrupted segments; no interval crossing a gap is counted.
+4. Calibrate on six normal windows (30 intervals). Baseline CV is the mean of those six window CV values. It remains fixed until explicit reset or device restart. Valid calibration intervals may accumulate across interrupted segments; no interval crossing a gap is counted.
 5. Experimental entry threshold: `max(2 * baselineCV, baselineCV + 3 percentage points)`. Require two consecutive high windows before entering `UNSTABLE`.
 6. Experimental recovery threshold: `max(1.5 * baselineCV, baselineCV + 1.5 percentage points)`. Require two consecutive low windows to recover.
 7. Emit one alert on entry, with a 10-second simulation-clock cooldown. An entry during cooldown changes the state without producing another motor command. Continued instability does not repeatedly vibrate.

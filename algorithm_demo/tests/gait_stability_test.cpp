@@ -36,8 +36,8 @@ template<class F> void test(const char* name, F body) {
 }
 int main() {
   try {
-    test("15-interval calibration and baseline-relative thresholds", [] {
-      check(Detector::BaselineIntervalTarget == 15, "Bench target must be fifteen intervals");
+    test("30-interval calibration and baseline-relative thresholds", [] {
+      check(Detector::BaselineIntervalTarget == 30, "Bench target must be thirty intervals");
       Runner r;
       r.feed(normal, 5, Detector::BaselineIntervalTarget - 1);
       check(!r.detector.calibrated(), "Calibration completed too early");
