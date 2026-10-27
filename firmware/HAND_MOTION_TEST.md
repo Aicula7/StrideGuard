@@ -1,10 +1,10 @@
 # Real Foot IMU: Calibration and Vigorous-Motion Demo
 
-Start with [QUICK_TEST.md](QUICK_TEST.md). This release changes **post-calibration detection** from gesture timing variability to sustained IMU intensity. The original 30-interval calibration procedure and its stored timing CV remain unchanged. Fixed intensity thresholds are independent of that timing baseline; this release does not claim baseline-relative intensity or validated gait instability.
+Start with [QUICK_TEST.md](QUICK_TEST.md). This release changes **post-calibration detection** from gesture timing variability to sustained IMU intensity. This demo uses 20 valid timing intervals and preserves the original gesture extraction and timing CV calculation. Fixed intensity thresholds are independent of that timing baseline; this release does not claim baseline-relative intensity or validated gait instability.
 
 ## Arduino files and hardware
 
-Keep the existing seven Arduino tabs. Six files change; `foot_hand_motion_test/HandMotionDetector.h` stays unchanged. See [ARDUINO_UPDATE.md](ARDUINO_UPDATE.md) for the copy/paste update map. No new Arduino tab is required: the independent `VigorousMotionDetector` class is appended to the Wrist `GaitStabilityDetector.h` after the unchanged timing class.
+Keep the existing seven Arduino tabs. This update changes the two `.ino` files and the Wrist `GaitStabilityDetector.h`; the other four headers stay unchanged from the preceding protocol-v2 release. See [ARDUINO_UPDATE.md](ARDUINO_UPDATE.md) for the copy/paste update map. No new Arduino tab is required: the independent `VigorousMotionDetector` class is appended to the Wrist `GaitStabilityDetector.h` after the timing class.
 
 - Foot: XIAO ESP32-C3 (COM3 in this setup), LSM6DS3TR-C at `0x6A`.
 - Wrist: Adafruit Feather ESP32-S3 No PSRAM (COM4), DRV2605L and existing ERM motor.
@@ -12,19 +12,19 @@ Keep the existing seven Arduino tabs. Six files change; `foot_hand_motion_test/H
 - I2C still uses `Wire.begin()` with board defaults. Core 2.0.17: XIAO C3 SDA=GPIO6/D4, SCL=GPIO7/D5; Feather S3 No PSRAM SDA=GPIO3, SCL=GPIO4. Keep actual working wiring.
 - Libraries: Adafruit LSM6DS 4.7.4, Adafruit DRV2605 Library 1.2.4, Adafruit Unified Sensor 1.1.15, Adafruit BusIO 1.17.4. Wire and BLE come from the ESP32 board package.
 
-## Calibration remains unchanged
+## Calibration: 20 valid intervals
 
 The Foot gesture extractor polls the real IMU about every 10 ms, with a 104 Hz sensor rate, 4 g acceleration range, and 500 degrees/second gyro range. It computes `dev = sqrt(ax^2+ay^2+az^2)-9.80665` and angular-rate magnitude.
 
 A gesture arms after 120 ms with `|dev| < 0.8 m/s^2` AND angular rate < 0.30 rad/s. An armed gesture triggers after at least 20 ms with `|dev| > 2.5 m/s^2` OR angular rate > 1.0 rad/s, and at least 350 ms since the previous event. Another quiet hold is needed for another event. `MOVE_NOW`, `HOLD_STILL`, `armed`, and `events` relate to this calibration extractor.
 
-Wrist `r` stops the motor, clears calibration, and starts again. The first event is a time reference. Thirty accepted intervals form six non-overlapping five-interval windows. Calibration accepts 350-2500 ms intervals. Gaps/no event for 2800 ms break timing continuity without erasing valid progress. Missed gesture sequences also break continuity. Baseline timing CV is the mean of the six window CVs and remains in RAM until `r`, reset, power loss, or upload.
+Foot starts with continuous sample transmission OFF. Send `c` to Foot before sending `r` to Wrist. Wrist `r` stops the motor, clears calibration, and starts again. The first event is a time reference. Twenty accepted intervals form four non-overlapping five-interval windows; at least 21 detected and received gesture events are needed. Calibration accepts 350-2500 ms intervals. Gaps/no event for 2800 ms break timing continuity without erasing valid progress. Missed gesture sequences also break continuity. Baseline timing CV is the mean of the four window CVs and remains in RAM until `r`, reset, power loss, or upload.
 
-On `BASELINE_READY`, Wrist stops feeding gesture intervals into the timing detector. The learned timing CV remains available, but is not converted into acceleration/gyro thresholds. Gesture pauses/loss after calibration do not interrupt continuous motion analysis.
+On `BASELINE_READY`, Wrist stops feeding gesture intervals into the timing detector. Send `m` to Foot to enable continuous sample transmission. The learned timing CV remains available, but is not converted into acceleration/gyro thresholds. Gesture pauses/loss after calibration do not interrupt continuous motion analysis.
 
 ## New continuous data path
 
-Foot sends actual magnitude samples about every **20 ms (50 Hz)**, independently of gesture events. No random motion values, forced events, or synthetic alarm inputs are generated. `esp_random()` is used only for a boot identity.
+When enabled with Foot `m`, Foot sends actual magnitude samples about every **20 ms (50 Hz)**, independently of gesture events. Foot `c` stops only continuous sample transmission; local IMU sampling, gesture extraction, and heartbeats continue. After a gesture notification, the sample and heartbeat timers restart so they do not notify in the same loop iteration. No random motion values, forced events, or synthetic alarm inputs are generated. `esp_random()` is used only for a boot identity.
 
 Both `HandTestProtocol.h` copies use version 2 and the same 20-byte little-endian packet:
 
@@ -76,7 +76,7 @@ An automatic alarm switches the DRV2605L to real-time playback at `0x40` until a
 
 ## Verification
 
-Both sketches compile with Arduino CLI 1.3.1, ESP32 core 2.0.17, and the listed libraries for their primary boards. The unchanged timing and gesture suites contain 41 tests. Eighteen vigorous-motion tests cover RMS, persistence, hysteresis, transients, coverage, losses, rollover, sample/gesture separation, and continuous shaking with only one gesture event. A host integration check runs the actual Wrist sketch through calibration, continuous alarm, s/r/v, recovery, queue overflow, missing samples with healthy heartbeats, and disconnected stop using mocked hardware APIs. These tests do not verify physical motor strength, the user's actual gesture RMS, or ESP32 radio behavior.
+The preceding protocol-v2 release was compiled with Arduino CLI 1.3.1, ESP32 core 2.0.17, and the listed libraries for the primary boards. The current 20-interval edits have been checked with host simulation; a fresh ESP32 target build is not available in this environment. The independent timing suite and the updated gesture suite cover their respective calibration targets. Eighteen vigorous-motion tests cover RMS, persistence, hysteresis, transients, coverage, losses, rollover, sample/gesture separation, and continuous shaking with only one gesture event. A host integration check runs the actual Wrist sketch through calibration, continuous alarm, s/r/v, recovery, queue overflow, missing samples with healthy heartbeats, and disconnected stop using mocked hardware APIs. The integration check also verifies 20-interval calibration using only gesture events and heartbeats before testing interleaved continuous samples. These tests do not verify physical motor strength, the user's actual gesture RMS, or ESP32 radio behavior.
 
 ```sh
 g++ -std=c++11 -Wall -Wextra -Werror -pedantic firmware/tests/vigorous_motion_test.cpp -o /tmp/vigorous_test

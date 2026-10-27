@@ -15,7 +15,7 @@ Adafruit_DRV2605 drv;
 bool hapticReady = false;
 bool alarmLatched = false;
 constexpr uint8_t AlarmRtpLevel = 0x40;  // Bench-test ERM drive level.
-GaitStabilityDetector timing;  // Original 30-interval calibration, unchanged.
+GaitStabilityDetector timing;  // Twenty valid intervals for this bench demo.
 VigorousMotionDetector intensity;
 HandEventTracker tracker;
 BLEClient* client = nullptr;
@@ -285,7 +285,8 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
   }
   if (result.justCalibrated) {
     intensity.reset();
-    Serial.println("# BASELINE_READY: 30 timing intervals saved. Switching to CONTINUOUS VIGOROUS MOTION detection.");
+    Serial.printf("# BASELINE_READY: %u timing intervals saved. Send m in the FOOT serial monitor to start the continuous motion demo.\n",
+        static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget));
     Serial.println("# Fixed intensity thresholds are independent of timing CV. Move gently for STABLE; shake continuously for the alarm.");
     Serial.println("# Gesture events and quiet holds are no longer required. Four high 500 ms windows trigger the alarm; s stops it.");
     if (result.baselineCv > 10.0f) Serial.println("# BASELINE_NOISY: timing CV is high; it does not change the fixed motion thresholds.");
@@ -293,8 +294,9 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
 }
 
 void printHelp() {
-  Serial.println("# HAND_TEST_BUILD: vigorous-motion-v2 protocol=2; upload BOTH matching sketches.");
-  Serial.println("# r: stop and restart original 30-interval calibration; s: stop alarm, keep baseline; v: short motor test; ?: help");
+  Serial.println("# HAND_TEST_BUILD: baseline20-manual-stream-v1 protocol=2; upload BOTH matching sketches.");
+  Serial.println("# WRIST_COMMANDS: r = restart calibration; s = stop alarm, keep baseline; v = short motor test; ? = help");
+  Serial.println("# Before calibration send c to FOOT, then r to WRIST. After BASELINE_READY send m to FOOT.");
   Serial.println("# After baseline: real 50 Hz motion samples, 500 ms RMS windows, four consecutive high windows to alert.");
   Serial.printf("# FIXED_DEMO_THRESHOLDS accel_enter=%.2f mps2 gyro_enter=%.2f rad/s accel_exit=%.2f gyro_exit=%.2f\n",
       VigorousMotionDetector::AccelEnter, VigorousMotionDetector::GyroEnter,

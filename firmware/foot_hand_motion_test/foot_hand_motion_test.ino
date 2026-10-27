@@ -26,6 +26,9 @@ HandMotionDetector::Result latest;
 float peakDeviation = 0;
 float peakAngularRate = 0;
 bool movePromptShown = false;
+// Calibration only needs gesture events and heartbeats.
+// Send m in this FOOT serial monitor after the WRIST reports BASELINE_READY.
+bool streamMotion = false;
 
 class HandServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override { connected.store(true); }
@@ -55,7 +58,7 @@ void notifyPacket(uint8_t type, uint32_t timestampMs) {
 void setup() {
   Serial.begin(115200);
   delay(1500);
-  Serial.println("# HAND_TEST_BUILD: vigorous-motion-v2 protocol=2");
+  Serial.println("# HAND_TEST_BUILD: baseline20-manual-stream-v1 protocol=2");
   Serial.println("# MANUAL_HAND_TEST: real foot IMU input, not validated gait detection.");
   // Use the selected board's SDA/SCL pins, not XIAO-only D4/D5 aliases.
   // For custom wiring, replace this with Wire.begin(sdaGpio, sclGpio).
@@ -90,11 +93,23 @@ void setup() {
       static_cast<unsigned long>(HandMotionDetector::ActiveHoldMs));
   Serial.println("# HAND_GUIDE: try one 30-45 degree tilt in about 0.4 s, then hold still about 1 s. Alternate direction each time.");
   Serial.println("# Calibration gestures need quiet rearming. After BASELINE_READY, continuous motion needs no gesture or quiet hold.");
-  Serial.println("# MOTION_STREAM: sending real magnitude samples about every 20 ms, independently of gesture events.");
+  Serial.println("# CALIBRATION_MODE: gesture events + heartbeat; continuous motion stream OFF.");
+  Serial.println("# FOOT_COMMANDS: c = stream OFF for calibration; m = stream ON after wrist BASELINE_READY.");
 }
 
 void loop() {
   const uint32_t now = millis();
+  while (Serial.available()) {
+    const char command = static_cast<char>(Serial.read());
+    if (command == 'm' || command == 'M') {
+      streamMotion = true;
+      Serial.println("# Continuous motion stream ON (about 50 Hz)");
+    }
+    if (command == 'c' || command == 'C') {
+      streamMotion = false;
+      Serial.println("# Calibration mode: events + heartbeat only; motion stream OFF");
+    }
+  }
   if (restartAdvertising.exchange(false)) {
     BLEDevice::startAdvertising();
     Serial.println("# BLE advertising restarted.");
@@ -114,6 +129,9 @@ void loop() {
     if (latest.event) {
       ++eventSequence;
       notifyPacket(HandTest::Gesture, now);
+      // Keep heartbeat/sample notifications out of this gesture's loop iteration.
+      lastHeartbeatMs = now;
+      lastMotionSampleMs = now;
       Serial.printf("# HAND_EVENT seq=%lu foot_ms=%lu dev_mps2=%.2f gyro_rps=%.2f connected=%d\n",
           static_cast<unsigned long>(eventSequence), static_cast<unsigned long>(now),
           latest.accelerationDeviation, latest.angularRateMagnitude, connected.load() ? 1 : 0);
@@ -124,7 +142,7 @@ void loop() {
       movePromptShown = true;
       Serial.println("# MOVE_NOW: calibration gesture ready. After baseline, ignore this prompt and move continuously.");
     }
-    if (latest.valid && now - lastMotionSampleMs >= 20) {
+    if (streamMotion && latest.valid && now - lastMotionSampleMs >= 20) {
       lastMotionSampleMs = now;
       ++motionSampleSequence;
       notifyPacket(HandTest::MotionSample, now);
@@ -136,7 +154,7 @@ void loop() {
   }
   if (now - lastStatusMs >= 1000) {
     lastStatusMs = now;
-    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f peak_dev_mps2=%.2f peak_gyro_rps=%.2f gesture_phase=%s armed=%d connected=%d events=%lu sample_seq=%lu quiet_ms=%lu/%lu calibration_hint=%s\n",
+    Serial.printf("# SENSOR dev_mps2=%.2f gyro_rps=%.2f peak_dev_mps2=%.2f peak_gyro_rps=%.2f gesture_phase=%s armed=%d connected=%d events=%lu sample_seq=%lu quiet_ms=%lu/%lu calibration_hint=%s stream_motion=%d\n",
         latest.accelerationDeviation, latest.angularRateMagnitude, peakDeviation, peakAngularRate,
         HandMotionDetector::phaseName(latest.phase), latest.armed ? 1 : 0,
         connected.load() ? 1 : 0, static_cast<unsigned long>(eventSequence),
@@ -144,7 +162,8 @@ void loop() {
         static_cast<unsigned long>(latest.quietHoldMs),
         static_cast<unsigned long>(HandMotionDetector::QuietHoldMs),
         !latest.valid ? "CHECK_IMU" : !latest.armed ? "HOLD_STILL" :
-        latest.phase == HandMotionDetector::Phase::Cooldown ? "WAIT_COOLDOWN" : "MOVE_ONCE");
+        latest.phase == HandMotionDetector::Phase::Cooldown ? "WAIT_COOLDOWN" : "MOVE_ONCE",
+        streamMotion ? 1 : 0);
     peakDeviation = 0;
     peakAngularRate = 0;
   }

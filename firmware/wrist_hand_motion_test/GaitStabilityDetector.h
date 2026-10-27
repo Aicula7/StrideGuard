@@ -10,7 +10,7 @@
 class GaitStabilityDetector {
  public:
   static constexpr size_t WindowSize = 5;
-  static constexpr size_t BaselineWindows = 6;  // Thirty valid intervals for bench calibration.
+  static constexpr size_t BaselineWindows = 4;  // Twenty valid intervals for bench calibration.
   static constexpr size_t BaselineIntervalTarget = WindowSize * BaselineWindows;
   static constexpr uint8_t EnterWindows = 2;
   static constexpr uint8_t ExitWindows = 2;

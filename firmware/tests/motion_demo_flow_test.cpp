@@ -6,6 +6,7 @@ void check(bool value, const char* message) { if (!value) throw std::runtime_err
 uint32_t sampleSequence = 0;
 uint32_t gestureSequence = 0;
 uint32_t footTime = 10000;
+constexpr uint32_t CalibrationTarget = GaitStabilityDetector::BaselineIntervalTarget;
 void packet(uint8_t type, float accel = 0.15f, float gyro = 0.03f, bool runLoop = true) {
   hostNow = footTime;
   HandTest::Packet frame = {HandTest::Magic, HandTest::Version, type, 99,
@@ -23,27 +24,39 @@ int main() {
  try {
   setup(); linkUp.store(true); subscribed = true; lastPacketAt = millis();
   command('r');
+  // Default Foot mode sends only real gesture events and heartbeats.
+  for (uint32_t i = 0; i <= CalibrationTarget; ++i) {
+    ++gestureSequence;
+    packet(HandTest::Gesture);
+    footTime += 500; packet(HandTest::Heartbeat);
+    footTime += 500; packet(HandTest::Heartbeat);
+    footTime += 500;
+  }
+  check(timing.calibrated() && timing.baselineIntervals() == CalibrationTarget &&
+        eventsReceived == CalibrationTarget + 1 && !haveMotionSamples && !alarmLatched,
+        "Events-and-heartbeats-only calibration failed");
+  command('r');
   samples(2500, 5, 5);
   check(!timing.calibrated() && !alarmLatched && intensity.state() == VigorousMotionDetector::State::WaitingForData,
         "Pre-calibration samples triggered motion assessment");
   const uint32_t calibrationStart = footTime;
-  for (int i = 0; i <= 1500; ++i) {
+  for (uint32_t i = 0; i <= CalibrationTarget * 50; ++i) {
     footTime = calibrationStart + static_cast<uint32_t>(i) * 20;
     if (i % 50 == 0) { ++gestureSequence; packet(HandTest::Gesture); }
     packet(HandTest::MotionSample);
   }
-  check(timing.calibrated() && timing.baselineIntervals() == 30, "Original calibration failed with interleaved samples");
-  check(eventsReceived == 31 && !alarmLatched, "Wrong calibration event count or premature alarm");
+  check(timing.calibrated() && timing.baselineIntervals() == CalibrationTarget, "Configured calibration failed with interleaved samples");
+  check(eventsReceived == CalibrationTarget + 1 && !alarmLatched, "Wrong calibration event count or premature alarm");
   check(intensity.state() == VigorousMotionDetector::State::Collecting, "Post-baseline collection did not begin");
   samples(1500, 4.5f, 4);
   check(!alarmLatched && intensity.state() == VigorousMotionDetector::State::Suspect, "Alarm fired before fourth window");
   samples(500, 4.5f, 4);
   check(alarmLatched && drv.outputActive() && drv.mode == DRV2605_MODE_REALTIME, "Continuous alarm did not start");
   samples(1500, 4.5f, 4);
-  check(eventsReceived == 31 && intensity.state() == VigorousMotionDetector::State::Unstable,
+  check(eventsReceived == CalibrationTarget + 1 && intensity.state() == VigorousMotionDetector::State::Unstable,
         "No gesture events incorrectly paused post-baseline motion detection");
   command('s');
-  check(!alarmLatched && !drv.outputActive() && timing.baselineIntervals() == 30,
+  check(!alarmLatched && !drv.outputActive() && timing.baselineIntervals() == CalibrationTarget,
         "s did not stop RTP while retaining baseline");
   check(intensity.state() == VigorousMotionDetector::State::Unstable, "s forced an artificial recovery");
   samples(1000, 4.5f, 4);
@@ -58,7 +71,7 @@ int main() {
   footTime += 600; packet(HandTest::Heartbeat);
   check(intensity.state() == VigorousMotionDetector::State::WaitingForData && !haveMotionSamples,
         "Healthy heartbeats disguised missing motion data");
-  check(timing.baselineIntervals() == 30 && alarmLatched && drv.outputActive(), "Data gap cleared baseline or alarm");
+  check(timing.baselineIntervals() == CalibrationTarget && alarmLatched && drv.outputActive(), "Data gap cleared baseline or alarm");
   command('s'); command('v');
   check(drv.clicks == 1 && !alarmLatched && drv.mode == DRV2605_MODE_INTTRIG,
         "Short manual test failed after continuous stop");

@@ -109,15 +109,16 @@ int main() {
       }
       check(r.events == 0 && !r.timing.calibrated() && r.alerts == 0, "Subthreshold slow movement incorrectly counted");
     });
-    test("thirty-one original gestures establish exactly thirty valid intervals", [] {
+    test("target plus one gestures establish exactly the configured baseline intervals", [] {
+      const int target = static_cast<int>(GaitStabilityDetector::BaselineIntervalTarget);
       SensorRunner r; r.hold(1000);
-      for (int i = 0; i < 30; ++i) {
+      for (int i = 0; i < target; ++i) {
         r.hold(1000, HandMotionDetector::Gravity, 1.2f);
         r.hold(1000);
       }
-      check(r.events == 30 && r.timing.baselineIntervals() == 29 && !r.timing.calibrated(), "Calibration finished before thirty intervals");
+      check(r.events == target && r.timing.baselineIntervals() == static_cast<size_t>(target - 1) && !r.timing.calibrated(), "Calibration finished before the target interval count");
       r.hold(1000, HandMotionDetector::Gravity, 1.2f); r.hold(1000);
-      check(r.events == 31 && r.timing.baselineIntervals() == 30 && r.timing.calibrated() && r.alerts == 0, "Thirtieth interval did not complete calibration");
+      check(r.events == target + 1 && r.timing.baselineIntervals() == static_cast<size_t>(target) && r.timing.calibrated() && r.alerts == 0, "Target interval did not complete calibration");
     });
     test("acceleration-only movement can trigger an event", [] {
       SensorRunner r; r.hold(300); r.hold(100, 14.0f);
@@ -158,12 +159,12 @@ int main() {
       r.hold(140);
       check(r.latest.armed && r.latest.quietHoldMs == 120, "Full quiet hold did not finish");
     });
-    test("thirty-one alternating tilt-and-hold cycles at 1.5 seconds complete calibration", [] {
+    test("target plus one alternating tilt-and-hold cycles at 1.5 seconds complete calibration", [] {
       SensorRunner r; r.hold(1000);
-      for (int i = 0; i < 31; ++i) {
+      for (size_t i = 0; i <= GaitStabilityDetector::BaselineIntervalTarget; ++i) {
         r.hold(400, HandMotionDetector::Gravity, i % 2 ? -1.8f : 1.8f);
         r.hold(1100, HandMotionDetector::Gravity, 0.04f);
-        check(r.events == i + 1, "A guided cycle did not produce exactly one gesture");
+        check(r.events == static_cast<int>(i + 1), "A guided cycle did not produce exactly one gesture");
         check(r.timing.baselineIntervals() == static_cast<size_t>(i), "Incorrect interval progress");
       }
       check(r.timing.calibrated() && r.alerts == 0, "Guided baseline failed");

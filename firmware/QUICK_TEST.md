@@ -10,18 +10,18 @@ This is a fixed-threshold bench demo, not a gait/fall diagnosis.
 | Foot | `foot_hand_motion_test/foot_hand_motion_test.ino` | XIAO_ESP32C3 / COM3 |
 | Wrist | `wrist_hand_motion_test/wrist_hand_motion_test.ino` | Adafruit Feather ESP32-S3 No PSRAM / COM4 |
 
-Upload **both matching v2 sketches and headers**. Open both Serial Monitors at **115200 baud**. Expect `vigorous-motion-v2 protocol=2`, Foot `connected=1`, and Wrist `link=1`.
+Upload **both matching v2 sketches and headers**. Open both Serial Monitors at **115200 baud**. Expect `baseline20-manual-stream-v1 protocol=2`, Foot `connected=1`, and Wrist `link=1`.
 
-## 1. Reset and calibrate as before
+## 1. Reset and collect 20 timing intervals
 
-In **Wrist**, enter **`r`** once. Expect `0/30`. Optional: `v` tests one short vibration.
+In **Foot**, enter **`c`** to turn continuous samples off. After Wrist shows `LINK_READY`, enter **`r`** in **Wrist** once. Expect `0/20`. Optional: `v` tests one short vibration.
 
 Use separate tilt-and-hold gestures: tilt once, stop until `MOVE_NOW`, tilt back, stop again. One direction is one event. Aim for an even 1.5-second rhythm (40 BPM), as before.
 
-- First event is a reference: `0/30`.
-- The next 30 valid intervals complete `30/30`; normally about 31 gestures.
+- First event is a reference: `0/20`.
+- The next 20 valid intervals complete `20/20`; at least 21 detected and received gestures are needed.
 - Pauses retain progress; calibration intervals remain 350-2500 ms.
-- Expect `BASELINE_READY` and `Switching to CONTINUOUS VIGOROUS MOTION detection`.
+- Expect `BASELINE_READY`; then send **`m` to Foot** to enable continuous motion samples.
 
 The original timing baseline is retained. Its CV is **not** used to set the new fixed motion thresholds. `BASELINE_NOISY` reports timing quality only and does not block the motion demo.
 
@@ -29,7 +29,7 @@ The original timing baseline is retained. Its CV is **not** used to set the new 
 
 ## 2. Show stable motion
 
-Hold the Foot module still or move it gently for 2-3 seconds. Continuous samples are sent even when `events` stays fixed.
+After sending `m` to Foot, hold the Foot module still or move it gently for 2-3 seconds. Continuous samples are sent even when `events` stays fixed.
 
 Expect `data_state=COLLECTING_WINDOW` initially, then half-second `MOTION_WINDOW` lines with `state=STABLE`. Stillness with valid samples is stable, not missing data.
 
@@ -58,7 +58,7 @@ Confirm physical motor vibration. A short shake may make `SUSPECT` without an al
 
 ## 4. Stop and recover
 
-Enter **`s` in Wrist**: vibration stops and baseline remains `30/30`. This acknowledges the alarm; it does not force `STABLE`.
+Enter **`s` in Wrist**: vibration stops and baseline remains `20/20`. This acknowledges the alarm; it does not force `STABLE`.
 
 Return to stillness/gentle motion. Four consecutive windows with **both** RMS values below **1.5** recover to `STABLE`. An unacknowledged motor alarm continues even after recovery. A fresh episode after recovery can trigger again.
 
@@ -73,10 +73,13 @@ Return to stillness/gentle motion. Four consecutive windows with **both** RMS va
 | `event_activity=NO_RECENT_EVENTS` | No recent tilt event; normal during continuous shaking |
 | `MOTION_DATA_GAP` | Incomplete coverage/burst loss; pending evidence restarted |
 | `motion_samples_rx` | Received continuous sample count, independent of `events_rx` |
-| `s` / `r` / `v` | Stop alarm / stop and recalibrate / one short motor test |
+| Foot `c` / `m` | Continuous samples OFF for calibration / ON after baseline |
+| Wrist `s` / `r` / `v` | Stop alarm / stop and recalibrate / one short motor test |
 
 ## Tune only after reading actual windows
 
 Starting thresholds are engineering demo values, not validated or learned intensity limits. In the **Wrist** `GaitStabilityDetector.h`, find `class VigorousMotionDetector` and adjust `AccelEnter` / `GyroEnter`. Use quiet/gentle and vigorous `MOTION_WINDOW` measurements to choose a separation. A normal fast rotation may also be high intensity.
+
+During calibration, Foot `stream_motion=0` and Wrist `data_state=NO_DATA` are expected: real IMU sampling and gesture extraction continue locally, but continuous sample packets are off. To recalibrate, send `c` to Foot before `r` to Wrist.
 
 Missing motion samples, disconnection, or queue overflow reset pending intensity evidence and retain baseline/alarm. A long sampling gap cannot count toward a sustained alarm. Wrist reset/power loss/upload clears the RAM baseline.
