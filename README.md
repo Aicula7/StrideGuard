@@ -7,7 +7,7 @@ ECE 590 running-gait monitoring prototype: a shoe-mounted IMU and XIAO ESP32-C3 
 | Directory | Purpose | Current status |
 | --- | --- | --- |
 | `firmware/foot_hand_motion_test/` | Real foot IMU gesture events sent over BLE | Original working gesture settings restored, with trigger diagnostics; uses board-default I2C; C3 and Feather S3 compilation verified |
-| `firmware/wrist_hand_motion_test/` | Real-event timing baseline, deviation detection, and haptics | Current bench-test receiver; Feather ESP32-S3 No PSRAM compilation verified |
+| `firmware/wrist_hand_motion_test/` | Real-event timing baseline, deviation detection, and haptics | Continuous automatic alarm until wrist `s`; `v` tests a short click; Feather ESP32-S3 No PSRAM compilation verified |
 | `firmware/foot_full_ble_test/` | Foot IMU acquisition and BLE notification server | Original full hardware-test source preserved |
 | `firmware/wrist_full_system_test/` | BLE receiver, wrist IMU, and manual vibration test | Original full hardware-test source preserved; no automatic gait detector integrated |
 | `algorithm_demo/gait_stability_sim/` | Independent baseline-relative stride-timing simulation | Software detector tested on generated events; no real IMU input |

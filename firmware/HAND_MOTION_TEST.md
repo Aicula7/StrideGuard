@@ -92,7 +92,22 @@ Send **`r` to the wrist** to clear timing history. Use the same distinct move-an
 
 Keep gesture shape and strength similar, but make the **intervals** uneven: for example alternate gesture-onset intervals of about 1.2 seconds and 2.2 seconds, with a quiet hold between movements. You may pause to inspect logs without losing the baseline. After resuming, use a fresh uninterrupted sequence of gestures: two high-variability, non-overlapping five-interval windows are still required before wrist output becomes `UNSTABLE` and prints `HAND_TIMING_ALERT`; an initialized driver also receives the vibration command.
 
-Return to an even gesture rhythm that reliably produces one event per intended movement. Expect recovery after two complete low-variability windows; allow about 10-15 regular gestures if a transition window is mixed. Continued irregularity does not repeatedly vibrate; alerts occur on entry with cooldown.
+Return to an even gesture rhythm that reliably produces one event per intended movement. Expect detector recovery after two complete low-variability windows; allow about 10-15 regular gestures if a transition window is mixed. The automatic haptic alarm is latched separately from detector state: it continues until acknowledged with `s`, even when the detector recovers. Alerts are generated on episode entry with cooldown.
+
+## Continuous alarm and acknowledgement
+
+In wrist build `latched-alarm-v1`, `HAND_TIMING_ALERT` calls `startAlarm()`. An available DRV2605L switches to real-time playback mode and holds RTP level `0x40` for continuous ERM drive. It prints `ALARM_LATCHED` and `HAPTIC_COMMAND_SENT mode=CONTINUOUS`. This is a motor command, not physical confirmation of vibration. Existing wiring, motor response, and drive level still need bench verification.
+
+- Send **`s` to the wrist** to stop the motor and clear only the alarm latch. It writes RTP zero and restores internal-trigger mode. The baseline and detector state are retained. Uppercase `S` also works.
+- `s` acknowledges the current episode. The detector does not immediately re-alert while it remains in that same `UNSTABLE` episode. A future alert still requires fresh detector entry, subject to its cooldown.
+- Send `r` to stop the alarm and clear/rebuild the baseline. Wrist reset/power loss also clears the in-memory state; startup initializes the driver with zero RTP.
+- `v` remains a single short motor test. While an alarm is already latched, `v` leaves it running and asks for `s` instead.
+- Timing recovery, motion pauses, and Foot disconnection do not automatically silence a latched alarm. If the link is lost while latched, reconnection attempts wait until acknowledgement so blocking BLE scans cannot delay `s` processing.
+- If the driver is unavailable, the software latch and serial alert still work, but the log explicitly says no motor command was sent. `STATUS` includes `alarm_latched=0/1` when the link is active. `alarm_latched=1` can coexist with timing state `STABLE` after recovery.
+
+For a full bench check: verify `v` gives one short click, establish the baseline, produce two consecutive high-CV windows, confirm continuous motor vibration, resume even gestures and observe that the latch remains active, then send `s` and confirm physical stopping with the baseline still at 15/15. Finally verify `v` works again. Do not infer that five gestures alone should trigger the motor: five intervals form one window, and two high windows are required.
+
+The latch revision compiled for Feather ESP32-S3 No PSRAM with core 2.0.17. A host check exercised the actual sketch's haptic functions with a mocked driver and the real timing detector: two high windows start the latch, recovery and interruption retain it, acknowledgement zeros RTP without clearing calibration, a subsequent manual click works, and an unavailable driver produces no motor writes. This does not verify physical motor strength or stopping. Only `wrist_hand_motion_test.ino` changed among the firmware source files for this revision; replacing/uploading it restarts the wrist and requires a new RAM baseline.
 
 The exact experimental thresholds are shared with the [synthetic-input detector](../algorithm_demo/README.md). For each five-interval window, `CV = standard deviation / mean * 100`. Baseline CV is the mean of three calibration-window CVs (15 valid intervals). This shortened calibration is intended for the initial hand test; longer running-data calibration still needs evaluation. Entry is `max(2*baselineCV, baselineCV + 3 percentage points)` for two windows; recovery is `max(1.5*baselineCV, baselineCV + 1.5 percentage points)` for two windows. This tests timing consistency, not a universal normal/abnormal running threshold.
 
@@ -137,7 +152,7 @@ Check the foot `SENSOR` lines first if gestures are missed. `armed=0` during con
 
 To change the target later, edit `BaselineWindows` in `GaitStabilityDetector.h`; `WindowSize=5` and `BaselineWindows=3` produce 15 intervals. The current complete sketch derives progress text from this target. In older hand-edited sketches, change only the literal `/30` display suffix to `/15`; never replace every occurrence of the number `30` because that would also corrupt values such as `3000`.
 
-Wrist commands are **`r`** (recalibrate), **`v`** (manual motor test), and **`?`** (help). There is no `u` command to manufacture abnormal input in this real-foot version.
+Wrist commands are **`s`** (stop/acknowledge the continuous alarm, keep baseline), **`r`** (stop and recalibrate), **`v`** (one short manual motor test), and **`?`** (help). There is no `u` command to manufacture abnormal input in this real-foot version. The synthetic sketch uses different commands; its `s` means a single synthetic disturbance, not alarm acknowledgement.
 
 ## Validation and remaining limits
 

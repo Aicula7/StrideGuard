@@ -13,6 +13,8 @@
 // This sketch does not generate synthetic events or use wrist motion as gait.
 Adafruit_DRV2605 drv;
 bool hapticReady = false;
+bool alarmLatched = false;
+constexpr uint8_t AlarmRtpLevel = 0x40;  // Bench-test ERM drive level.
 GaitStabilityDetector timing;
 HandEventTracker tracker;
 BLEClient* client = nullptr;
@@ -77,6 +79,10 @@ void pauseReception(const char* reason) {
 }
 
 void vibrate() {
+  if (alarmLatched) {
+    Serial.println("# ALARM_ALREADY_LATCHED: send s to stop; manual click skipped.");
+    return;
+  }
   if (!hapticReady) {
     Serial.println("# HAPTIC_UNAVAILABLE: serial alert only; no motor command sent.");
     return;
@@ -85,6 +91,32 @@ void vibrate() {
   drv.setWaveform(1, 0);
   drv.go();
   Serial.println("# HAPTIC_COMMAND_SENT");
+}
+
+void startAlarm() {
+  if (alarmLatched) return;
+  alarmLatched = true;
+  Serial.println("# ALARM_LATCHED: continuous vibration until s; recovery and pauses do not silence it.");
+  if (!hapticReady) {
+    Serial.println("# HAPTIC_UNAVAILABLE: alarm latched in software; no motor command sent.");
+    return;
+  }
+  drv.stop();
+  drv.setRealtimeValue(0);
+  drv.setMode(DRV2605_MODE_REALTIME);
+  drv.setRealtimeValue(AlarmRtpLevel);
+  Serial.println("# HAPTIC_COMMAND_SENT mode=CONTINUOUS; send s to stop.");
+}
+
+void stopAlarm() {
+  if (hapticReady) {
+    // RTP is stopped by writing zero, not just clearing the waveform GO bit.
+    drv.setRealtimeValue(0);
+    drv.stop();
+    drv.setMode(DRV2605_MODE_INTTRIG);
+  }
+  alarmLatched = false;
+  Serial.println("# ALARM_STOPPED: baseline retained; detector continues monitoring.");
 }
 
 void receiveNotification(BLERemoteCharacteristic*, uint8_t* data, size_t length, bool) {
@@ -191,15 +223,17 @@ void processPacket(const HandTest::Packet& packet, uint32_t arrivedAt) {
   }
   if (result.alert) {
     Serial.println("# HAND_TIMING_ALERT: sustained irregular real foot-module gestures; not a validated gait diagnosis.");
-    vibrate();
+    startAlarm();
   }
   if (result.cooldownSuppressed) Serial.println("# ALERT_SUPPRESSED: cooldown active.");
 }
 
 void printHelp() {
-  Serial.println("# HAND_TEST_BUILD: guided-baseline-v1");
+  Serial.println("# HAND_TEST_BUILD: latched-alarm-v1");
   Serial.println("# MANUAL_HAND_TEST: wrist receives real FOOT IMU gesture events, no synthetic input.");
-  Serial.println("# r: restart timing calibration; v: manual motor test; ?: help");
+  Serial.println("# s: stop latched vibration; r: stop and recalibrate; v: one short motor test; ?: help");
+  Serial.println("# Automatic alerts latch until s or r, even if timing recovers or FOOT disconnects.");
+  Serial.println("# s keeps the baseline and does not retrigger the same ongoing episode.");
   Serial.println("# Pauses/lost data keep valid calibration samples and baseline; only r or wrist restart clears them.");
   Serial.println("# A skipped interval never counts toward calibration. Wrist IMU is not used for this bench test.");
   Serial.printf("# Calibration target: %u valid intervals. First event is a time reference.\n",
@@ -239,7 +273,11 @@ void loop() {
   uint32_t now = millis();
   while (Serial.available()) {
     const char command = static_cast<char>(Serial.read());
-    if (command == 'r' || command == 'R') resetReception("# RESET: build a new normal HAND-motion baseline.");
+    if (command == 's' || command == 'S') stopAlarm();
+    if (command == 'r' || command == 'R') {
+      stopAlarm();
+      resetReception("# RESET: build a new normal HAND-motion baseline.");
+    }
     if (command == 'v' || command == 'V') {
       Serial.println("# MANUAL_MOTOR_TEST: independent of the detector.");
       vibrate();
@@ -251,6 +289,12 @@ void loop() {
     pauseReception("DISCONNECTED");
   }
   if (!linkUp.load() || !subscribed) {
+    // Keep the stop command responsive: do not enter blocking BLE discovery
+    // or connection attempts while an unacknowledged alarm is vibrating.
+    if (alarmLatched) {
+      delay(1);
+      return;
+    }
     if (static_cast<int32_t>(now - nextScanAt) >= 0) {
       connectFoot();
       nextScanAt = millis() + 3000;
@@ -277,12 +321,12 @@ void loop() {
   }
   if (now - lastStatusAt >= 2000) {
     lastStatusAt = now;
-    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s baseline=%u/%u activity=%s events_rx=%lu pauses=%lu last_pause=%s\n",
+    Serial.printf("# STATUS link=%d packet_age_ms=%lu state=%s baseline=%u/%u activity=%s events_rx=%lu pauses=%lu last_pause=%s alarm_latched=%d\n",
         linkUp.load() ? 1 : 0, static_cast<unsigned long>(now - lastPacketAt),
         GaitStabilityDetector::stateName(timing.state()), static_cast<unsigned>(timing.baselineIntervals()),
         static_cast<unsigned>(GaitStabilityDetector::BaselineIntervalTarget),
         eventSeen ? "ACTIVE" : "IDLE", static_cast<unsigned long>(eventsReceived),
-        static_cast<unsigned long>(pauseCount), lastPauseReason);
+        static_cast<unsigned long>(pauseCount), lastPauseReason, alarmLatched ? 1 : 0);
   }
   delay(1);
 }
