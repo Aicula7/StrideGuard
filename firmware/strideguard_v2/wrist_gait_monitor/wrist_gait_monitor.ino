@@ -35,6 +35,29 @@ uint32_t bootSession=0,lastSequence=0,lastRawMs=0,lastPacketAt=0,lastSummaryMs=0
 uint16_t lastState=0,lastStride=0,lastTolerance=0,lastImpact=0;
 uint32_t previousGaps=0,previousBad=0,previousTxDrops=0;
 
+// --- Phone-Facing BLE Server Handles & Callbacks ---
+BLEServer* pPhoneServer = nullptr;
+BLECharacteristic* pPhoneChar = nullptr;
+bool phoneSubscribed = false;
+
+// Ali added 
+// Dedicated service & char UUIDs for the Wrist -> iPhone bridge
+constexpr const char* PhoneServiceUuid = "87654321-4321-4321-4321-BA0987654321";
+constexpr const char* PhoneCharUuid    = "FEDCBAFE-4321-4321-4321-FEDCBAFEDCBA";
+
+class PhoneServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) override {
+    phoneSubscribed = true;
+    Serial.println("# LINK IPHONE_CONNECTED");
+  }
+  void onDisconnect(BLEServer* pServer) override {
+    phoneSubscribed = false;
+    Serial.println("# LINK IPHONE_DISCONNECTED restarting phone advertising");
+    pServer->startAdvertising();
+  }
+};
+// Ali added 
+
 void stopPattern() {
   if (hapticReady) drv.setRealtimeValue(0);
   hapticPhase=hapticPhases=hapticPriority=0;
@@ -63,13 +86,21 @@ void printHelp() {
   Serial.println("# HELP Raw acceleration includes gravity; acquisition timestamps are FOOT milliseconds since boot.");
   Serial.println("# COLUMNS DATA,foot_ms,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps");
 }
+// Ali edited
 void receivePacket(BLERemoteCharacteristic*,uint8_t* data,size_t size,bool) {
   GaitEvents::Packet p;
   if (!GaitEvents::decode(data,size,p)) { invalidPackets.fetch_add(1); return; }
   if (p.kind==GaitEvents::Raw) {
     if (xQueueSend(rawQueue,&p,0)!=pdTRUE) rawDrops.fetch_add(1);
   } else if (xQueueSend(eventQueue,&p,0)!=pdTRUE) eventDrops.fetch_add(1);
+
+  // Relay verified 20-byte V2 packet onward to connected iPhone
+  if (phoneSubscribed && pPhoneChar && size == sizeof(GaitEvents::Packet)) {
+    pPhoneChar->setValue(data, size);
+    pPhoneChar->notify();
+  }
 }
+// Ali edited
 class ClientCallbacks : public BLEClientCallbacks {
   void onConnect(BLEClient*) override {}
   void onDisconnect(BLEClient*) override { disconnected.store(true); }
