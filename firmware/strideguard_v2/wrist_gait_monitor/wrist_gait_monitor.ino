@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <Adafruit_DRV2605.h>
 #include <BLEDevice.h>
+#include <BLE2902.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <atomic>
