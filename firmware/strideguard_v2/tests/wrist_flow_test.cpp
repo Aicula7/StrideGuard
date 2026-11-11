@@ -7,6 +7,13 @@ int main(){
  Serial.output.clear();processPacket(raw);assert(Serial.output.empty()); // no old/unknown session attribution
  auto status=GaitEvents::make(GaitEvents::Status,100);status.data.status={42,GaitEvents::Running,0,0,0};
  processPacket(status);assert(sessionVerified&&bootSession==42);
+ forwardToPhone(status);assert(phoneNotify->notifications==0);
+ phoneCccd->setNotifications(true);
+ forwardToPhone(status);assert(phoneNotify->notifications==1);
+ GaitEvents::Packet phonePacket;
+ assert(GaitEvents::decode(reinterpret_cast<const uint8_t*>(phoneNotify->value.data()),phoneNotify->value.size(),phonePacket));
+ assert(phonePacket.kind==GaitEvents::Status && phonePacket.data.status.bootSession==42);
+ forwardToPhone(raw);assert(phoneNotify->notifications==1);
  processPacket(raw);assert(Serial.output.find("DATA,100,1.000,0.000,-1.000,10.0,-20.0,0.0")!=std::string::npos);
  auto b=GaitEvents::make(GaitEvents::Baseline,200);b.data.baseline={42,1000,150,216,GaitEvents::Ready};
  processPacket(b);assert(Serial.output.find("timing_range_ms=850..1150")!=std::string::npos);
@@ -19,6 +26,12 @@ int main(){
  assert(hapticPriority==3);startPattern(1);assert(hapticPriority==3);
  auto c=GaitEvents::make(GaitEvents::Contact,500);c.data.contact={1000,160,0,0,GaitEvents::Calibrated|GaitEvents::ValidInterval,20,5};
  processPacket(c);assert(Serial.output.find("type=WITHIN_BASELINE")!=std::string::npos);
+ auto impact=GaitEvents::make(GaitEvents::HardLanding,501);
+ impact.data.alert={42,8,300,216};
+ forwardToPhone(impact);
+ assert(phoneNotify->notifications==2);
+ assert(GaitEvents::decode(reinterpret_cast<const uint8_t*>(phoneNotify->value.data()),phoneNotify->value.size(),phonePacket));
+ assert(phonePacket.kind==GaitEvents::HardLanding && phonePacket.data.alert.sequence==8);
  auto ack=GaitEvents::make(GaitEvents::Ack,600);ack.data.ack={42,'r',1,GaitEvents::Running,0,20,0};
  processPacket(ack);assert(!seenBaseline);
  BLERemoteCharacteristic fake;control=&fake;subscribed=true;handlePcCommand('r');assert(fake.written=="r");

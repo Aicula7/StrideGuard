@@ -60,18 +60,24 @@ class BLEAdvertisedDevice;
 class BLEServerCallbacks{public:virtual ~BLEServerCallbacks(){}virtual void onConnect(BLEServer*){}virtual void onDisconnect(BLEServer*){}};
 class BLEClientCallbacks{public:virtual ~BLEClientCallbacks(){}virtual void onConnect(BLEClient*){}virtual void onDisconnect(BLEClient*){}};
 class BLECharacteristicCallbacks{public:virtual ~BLECharacteristicCallbacks(){}virtual void onWrite(BLECharacteristic*){}};
-class BLE2902{};
+class BLE2902 {
+public:
+ bool enabled=false;
+ bool getNotifications(){return enabled;}
+ void setNotifications(bool value){enabled=value;}
+};
 class BLECharacteristic {
 public:
- static constexpr int PROPERTY_NOTIFY=1,PROPERTY_WRITE=2;
+ static constexpr int PROPERTY_NOTIFY=1,PROPERTY_WRITE=2,PROPERTY_READ=4;
  std::string value;
+ unsigned notifications=0;
  void setValue(uint8_t* data,size_t n){value.assign(reinterpret_cast<char*>(data),n);}
  std::string getValue(){return value;}
- void notify(){} void addDescriptor(BLE2902*){} void setCallbacks(BLECharacteristicCallbacks*){}
+ void notify(){++notifications;} void addDescriptor(BLE2902*){} void setCallbacks(BLECharacteristicCallbacks*){}
 };
 class BLEService{public:BLECharacteristic* createCharacteristic(const char*,int){return new BLECharacteristic;}void start(){}};
 class BLEServer{public:void setCallbacks(BLEServerCallbacks*){}BLEService* createService(const char*){return new BLEService;}};
-class BLEAdvertising{public:void addServiceUUID(const char*){}};
+class BLEAdvertising{public:void addServiceUUID(const char*){}void setScanResponse(bool){}};
 class BLEAdvertisedDevice{public:bool haveServiceUUID(){return true;}bool isAdvertisingService(BLEUUID){return true;}};
 class BLEAdvertisedDeviceCallbacks{public:virtual ~BLEAdvertisedDeviceCallbacks(){}virtual void onResult(BLEAdvertisedDevice){}};
 class BLEScan{public:void start(int,bool){}void stop(){}void clearResults(){}void setAdvertisedDeviceCallbacks(BLEAdvertisedDeviceCallbacks*){}void setActiveScan(bool){}};

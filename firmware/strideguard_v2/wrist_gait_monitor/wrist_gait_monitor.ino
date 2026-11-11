@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <Adafruit_DRV2605.h>
 #include <BLEDevice.h>
+#include <BLE2902.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <atomic>
@@ -34,6 +35,47 @@ bool refreshPending=false,refreshAttempted=false;
 uint32_t bootSession=0,lastSequence=0,lastRawMs=0,lastPacketAt=0,lastSummaryMs=0;
 uint16_t lastState=0,lastStride=0,lastTolerance=0,lastImpact=0;
 uint32_t previousGaps=0,previousBad=0,previousTxDrops=0;
+
+// Phone-facing UUIDs from Ali's App integration branch.
+constexpr const char* PhoneServiceUuid="87654321-4321-4321-4321-BA0987654321";
+constexpr const char* PhoneNotifyUuid="FEDCBAFE-4321-4321-4321-FEDCBAFEDCBA";
+BLECharacteristic* phoneNotify=nullptr;
+BLE2902* phoneCccd=nullptr;
+std::atomic<bool> restartPhoneAdvertising(false);
+bool phoneNotifyReported=false;
+
+class PhoneServerCallbacks : public BLEServerCallbacks {
+  void onDisconnect(BLEServer*) override { restartPhoneAdvertising.store(true); }
+};
+
+void startPhoneService() {
+  auto* phoneServer=BLEDevice::createServer();
+  phoneServer->setCallbacks(new PhoneServerCallbacks());
+  auto* service=phoneServer->createService(PhoneServiceUuid);
+  phoneNotify=service->createCharacteristic(PhoneNotifyUuid,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  phoneCccd=new BLE2902();
+  phoneNotify->addDescriptor(phoneCccd);
+  service->start();
+  auto* advertising=BLEDevice::getAdvertising();
+  advertising->addServiceUUID(PhoneServiceUuid);
+  advertising->setScanResponse(true);
+  BLEDevice::startAdvertising();
+  Serial.printf("# PHONE ADVERTISING service=%s notify=%s\n",PhoneServiceUuid,PhoneNotifyUuid);
+}
+
+void forwardToPhone(GaitEvents::Packet& packet) {
+  // Called on the main loop, after foot packet validation and local haptics.
+  // Forward session events only. USB retains the full raw IMU stream.
+  if (!sessionVerified || packet.kind==GaitEvents::Raw || !phoneNotify) return;
+  phoneNotify->setValue(reinterpret_cast<uint8_t*>(&packet),sizeof(packet));
+  if (!phoneCccd->getNotifications()) return;
+  phoneNotify->notify();
+  if (!phoneNotifyReported) {
+    phoneNotifyReported=true;
+    Serial.printf("# PHONE NOTIFY_REQUESTED bytes=%u kind=%u\n",static_cast<unsigned>(sizeof(packet)),packet.kind);
+  }
+}
 
 void stopPattern() {
   if (hapticReady) drv.setRealtimeValue(0);
@@ -285,9 +327,16 @@ void setup() {
   BLEDevice::init("StrideGuard_Wrist_Gait_V2");
   client=BLEDevice::createClient(); client->setClientCallbacks(new ClientCallbacks());
   scanner=BLEDevice::getScan(); scanner->setAdvertisedDeviceCallbacks(new ScanCallbacks()); scanner->setActiveScan(true);
-  printHelp(); Serial.println("# LINK WRIST_READY build=V2_BLE_FIX searching for V2 foot");
+  startPhoneService();
+  printHelp(); Serial.println("# LINK WRIST_READY build=V2_PHONE_BRIDGE searching for V2 foot");
 }
 void loop() {
+  if (restartPhoneAdvertising.exchange(false)) {
+    phoneCccd->setNotifications(false);
+    phoneNotifyReported=false;
+    BLEDevice::startAdvertising();
+    Serial.println("# PHONE ADVERTISING restarted");
+  }
   if (disconnected.exchange(false)) {
     subscribed=false; control=nullptr; xQueueReset(eventQueue); xQueueReset(rawQueue); stopPattern();
     seenRaw=false; sessionVerified=false;
@@ -308,7 +357,10 @@ void loop() {
     delay(1); return;
   }
   GaitEvents::Packet p;
-  for (int i=0;i<8 && xQueueReceive(eventQueue,&p,0)==pdTRUE;++i) processPacket(p);
+  for (int i=0;i<8 && xQueueReceive(eventQueue,&p,0)==pdTRUE;++i) {
+    processPacket(p);
+    forwardToPhone(p);
+  }
   for (int i=0;i<4 && xQueueReceive(rawQueue,&p,0)==pdTRUE;++i) processPacket(p);
   if (!sessionVerified && millis()-subscriptionStartedMs>=SessionTimeoutMs) {
     Serial.println("# LINK NO_VALID_V2_SESSION | check foot data notifications and V2 firmware");
