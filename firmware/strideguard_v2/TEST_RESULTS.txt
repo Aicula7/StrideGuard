@@ -1,0 +1,25 @@
+Validation date: 2026-11-11
+
+PASS: Detector baseline acquisition (20 valid intervals), timing alert
+      persistence/rearm, impact threshold, roll confirmation gate, sensor
+      clipping exclusion, sample gaps, pauses, and rejected long intervals.
+PASS: Protocol V2 20-byte encoding/decoding, signed units, malformed/old
+      protocol rejection, and numeric saturation.
+PASS: Foot sketch control flow with Arduino/BLE/IMU API doubles: battery
+      startup, settling, wireless raw/contact/baseline records, reconnection,
+      remote commands, and IMU failures.
+PASS: Wrist sketch control flow with API doubles: session attribution,
+      numeric output, alert type labels, haptic priority, command forwarding,
+      and queue overflow counters.
+PASS: Wrist reconnect regression with API doubles: fresh service discovery,
+      cache refresh request on missing control, verified data-only fallback,
+      recovery of remote commands, and motor self-test without a foot link.
+PASS: PC logger parsing, malformed-record handling, fragmented USB serial
+      lines, and generated imu.csv/events.csv/serial_log.txt contents.
+
+The host C++ checks compile both sketches against minimal API doubles, NOT
+the actual ESP32 SDK. A real Arduino Verify/build, flashing, BLE throughput,
+motor behavior, battery operation, sensor axis orientation, and real walking
+accuracy have NOT been validated here.
+
+Reproduce host checks: python tests/run_tests.py (requires Python 3 and g++).
