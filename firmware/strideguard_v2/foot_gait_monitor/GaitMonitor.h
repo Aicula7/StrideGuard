@@ -20,19 +20,26 @@ struct Settings {
   float rearmG;
   float impactMarginG;
   float impactMultiplier;
+  float minHardLandingG;
+  float stiffHeelVerticalG;
+  float stiffHeelJerkGps;
   float rollRateDps;
   float rollAngleDeg;
+  float airborneRollDeg;
+  float airborneRateDps;
   uint32_t beforeContactMs;
   uint32_t afterContactMs;
 };
 
+// Calibrated thresholds for top-of-shoe Velcro mount (prevents normal walking/swing false positives)
 constexpr Settings WalkingSettings = {
-    MaxBaselineIntervals, 450, 1800, 1.25f, 1.10f, 0.35f, 1.35f, 250.0f, 12.0f, 40, 100};
+    MaxBaselineIntervals, 480, 1800, 1.30f, 1.12f, 0.85f, 1.55f, 2.65f, 2.45f, 85.0f, 280.0f, 18.0f, 42.0f, 380.0f, 40, 100};
 constexpr Settings HandheldSettings = {
-    8, 650, 3500, 1.15f, 1.07f, 0.18f, 1.15f, 100.0f, 10.0f, 60, 180};
+    8, 650, 3500, 1.18f, 1.08f, 0.35f, 1.30f, 1.65f, 1.50f, 40.0f, 140.0f, 13.0f, 30.0f, 200.0f, 60, 180};
 
 struct Result {
   bool contact = false;
+  bool airborneRollAlert = false;
   bool clipped = false;
   bool gap = false;
   bool baselineReady = false;
@@ -66,8 +73,6 @@ class Detector {
     return activeProfile == Profile::Handheld ? HandheldSettings : WalkingSettings;
   }
 
-  // A pause or missing sample breaks pending evidence, including the stride
-  // across the break. Keep previously accepted baseline measurements.
   void interrupt() {
     haveSample = false;
     haveContact = false;
@@ -75,6 +80,8 @@ class Detector {
     contactPending = false;
     historyCount = 0;
     historyNext = 0;
+    freeRollAngle = 0.0f;
+    freeRollPeakDps = 0.0f;
     clearTiming();
   }
 
@@ -84,8 +91,8 @@ class Detector {
   float strideToleranceMs() const { return strideTolerance; }
   float impactThresholdG() const { return impactThreshold; }
 
-  Result observe(uint32_t now, float accelerationG, float rollDps, bool clipped,
-                 bool enableRoll = true) {
+  Result observe(uint32_t now, float accelerationG, float verticalG, float rollDps, bool clipped,
+                 bool enableRoll = true, bool isTurning = false) {
     Result result;
     rollEnabled = enableRoll;
     const auto& config = settings();
@@ -97,6 +104,42 @@ class Detector {
       result.gap = true;
     }
 
+    const float dtSec = elapsed * 0.001f;
+    const float verticalJerkGps = (haveSample && dtSec > 0.0f) ? std::fabs(verticalG - prevVerticalG) / dtSec : 0.0f;
+    prevVerticalG = verticalG;
+
+    // Airborne / swing roll tracker: ONLY active after calibration completes, with continuous leaky decay
+    // so normal walking swing never accumulates into a false roll alert.
+    if (calibrated() && rollEnabled && !clipped && haveSample && dtSec > 0.0f) {
+      if (std::fabs(rollDps) > 45.0f) {
+        freeRollAngle = (freeRollAngle * 0.94f) + (rollDps * dtSec);
+        freeRollPeakDps = std::max(freeRollPeakDps * 0.94f, std::fabs(rollDps));
+      } else {
+        freeRollAngle *= 0.78f;
+        freeRollPeakDps *= 0.78f;
+        if (std::fabs(freeRollAngle) < 2.0f) {
+          freeRollAngle = 0.0f;
+          freeRollPeakDps = 0.0f;
+        }
+      }
+
+      if (!contactPending && !isTurning &&
+          (std::fabs(freeRollAngle) >= config.airborneRollDeg && freeRollPeakDps >= config.airborneRateDps) &&
+          (now - lastAirborneRollMs >= 900)) {
+        lastAirborneRollMs = now;
+        result.airborneRollAlert = true;
+        result.suddenRoll = true;
+        result.contactMs = now;
+        result.rollAngleDeg = freeRollAngle;
+        result.rollPeakDps = freeRollPeakDps;
+        freeRollAngle = 0.0f;
+        freeRollPeakDps = 0.0f;
+      }
+    } else if (!calibrated()) {
+      freeRollAngle = 0.0f;
+      freeRollPeakDps = 0.0f;
+    }
+
     const bool crossed = haveSample && accelerationG >= config.contactG && contactArmed;
     if (accelerationG >= config.contactG) contactArmed = false;
     if (accelerationG <= config.rearmG) contactArmed = true;
@@ -106,6 +149,10 @@ class Detector {
       lastContactMs = now;
       contactPending = true;
       peakImpact = accelerationG;
+      peakVerticalImpact = verticalG;
+      peakVerticalJerk = verticalJerkGps;
+      sustainedHighImpactFrames = (calibrated() && (accelerationG >= impactThreshold || verticalG >= config.stiffHeelVerticalG)) ? 1 : 0;
+      contactTurning = isTurning;
       contactClipped = false;
       roll = RollWindow();
       for (uint8_t i = 0; i < historyCount; ++i) {
@@ -124,10 +171,24 @@ class Detector {
       const uint32_t age = now - lastContactMs;
       if (age <= config.afterContactMs) {
         peakImpact = std::max(peakImpact, accelerationG);
+        peakVerticalImpact = std::max(peakVerticalImpact, verticalG);
+        peakVerticalJerk = std::max(peakVerticalJerk, verticalJerkGps);
+        if (calibrated() && (accelerationG >= impactThreshold || verticalG >= config.stiffHeelVerticalG)) {
+          ++sustainedHighImpactFrames;
+        }
+        contactTurning |= isTurning;
         contactClipped |= clipped;
         roll.add(sample, elapsed, config.rollRateDps);
       }
-      if (age >= config.afterContactMs) result = finishContact();
+      if (age >= config.afterContactMs) {
+        Result contactResult = finishContact();
+        if (calibrated() && result.airborneRollAlert && !contactResult.suddenRoll) {
+          contactResult.suddenRoll = true;
+          contactResult.rollAngleDeg = result.rollAngleDeg;
+          contactResult.rollPeakDps = result.rollPeakDps;
+        }
+        result = contactResult;
+      }
     }
     history[historyNext] = sample;
     historyNext = (historyNext + 1) % HistorySize;
@@ -178,15 +239,26 @@ class Detector {
     }
 
     const auto& config = settings();
-    result.suddenRoll = rollEnabled &&
-                       ((roll.angle >= config.rollAngleDeg && roll.fastPositive >= 2) ||
-                        (roll.angle <= -config.rollAngleDeg && roll.fastNegative >= 2));
+
+    // STRICT CALIBRATION GATE: Never emit roll or hard-landing alerts until baseline calibration is complete
+    if (calibrated() && !contactTurning) {
+      result.suddenRoll = rollEnabled &&
+                         ((roll.angle >= config.rollAngleDeg && roll.fastPositive >= 3) ||
+                          (roll.angle <= -config.rollAngleDeg && roll.fastNegative >= 3));
+
+      const bool heavyImpact = (peakImpact >= impactThreshold || peakVerticalImpact >= impactThreshold) &&
+                               sustainedHighImpactFrames >= 2;
+      const bool stiffHeelShock = (peakVerticalImpact >= config.stiffHeelVerticalG &&
+                                   peakVerticalJerk >= config.stiffHeelJerkGps &&
+                                   sustainedHighImpactFrames >= 2);
+      result.hardLanding = heavyImpact || stiffHeelShock;
+    }
+
     if (result.suddenRoll) {
       clearTiming();
       return result;
     }
 
-    result.hardLanding = calibrated() && peakImpact >= impactThreshold;
     const uint32_t stride = lastContactMs - timingContactMs;
     const bool validStride = haveTimingContact && stride >= config.minimumStrideMs &&
                              stride <= config.maximumStrideMs;
@@ -198,12 +270,14 @@ class Detector {
     result.strideMs = static_cast<uint16_t>(stride);
     result.intervalValid = true;
     if (!calibrated()) {
-      result.baselineAccepted = true;
-      strides[count] = static_cast<float>(stride);
-      impacts[count] = peakImpact;
-      if (++count == config.baselineTarget) {
-        finishBaseline();
-        result.baselineReady = true;
+      if (!contactTurning) {
+        result.baselineAccepted = true;
+        strides[count] = static_cast<float>(stride);
+        impacts[count] = std::max(peakImpact, peakVerticalImpact);
+        if (++count == config.baselineTarget) {
+          finishBaseline();
+          result.baselineReady = true;
+        }
       }
       return result;
     }
@@ -243,11 +317,12 @@ class Detector {
       strides[i] = std::fabs(strides[i] - strideCenter);
     }
     const float mad = median(strides);
-    strideTolerance = std::max(100.0f, std::max(0.15f * strideCenter, 4.4478f * mad));
+    strideTolerance = std::max(120.0f, std::max(0.18f * strideCenter, 4.4478f * mad));
     const float impactCenter = median(impacts);
     const auto& config = settings();
-    impactThreshold = std::max(impactCenter + config.impactMarginG,
-                               config.impactMultiplier * impactCenter);
+    impactThreshold = std::max({config.minHardLandingG,
+                                impactCenter + config.impactMarginG,
+                                config.impactMultiplier * impactCenter});
   }
 
   Profile activeProfile;
@@ -258,15 +333,23 @@ class Detector {
   uint32_t lastSampleMs = 0;
   uint32_t lastContactMs = 0;
   uint32_t timingContactMs = 0;
+  uint32_t lastAirborneRollMs = 0;
   bool haveSample = false;
   bool haveContact = false;
   bool contactArmed = false;
   bool contactPending = false;
   bool contactClipped = false;
+  bool contactTurning = false;
   bool haveTimingContact = false;
   bool timingAlertActive = false;
   bool rollEnabled = true;
+  float prevVerticalG = 1.0f;
   float peakImpact = 0;
+  float peakVerticalImpact = 0;
+  float peakVerticalJerk = 0;
+  uint8_t sustainedHighImpactFrames = 0;
+  float freeRollAngle = 0.0f;
+  float freeRollPeakDps = 0.0f;
   float strides[MaxBaselineIntervals] = {};
   float impacts[MaxBaselineIntervals] = {};
   uint8_t count = 0;
